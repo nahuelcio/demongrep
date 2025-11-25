@@ -1,312 +1,747 @@
 # demongrep
 
-Fast, local semantic code search powered by Rust. A high-performance alternative to osgrep.
+**Fast, local semantic code search powered by Rust.**
+
+Search your codebase using natural language queries like *"where do we handle authentication?"* — all running locally with no API calls.
 
 ## Features
 
-- **Semantic Search**: Natural language queries like "where do we handle authentication?"
-- **Hybrid Search**: RRF fusion of vector similarity + Tantivy BM25 full-text search
-- **Neural Reranking**: Jina Reranker v1 Turbo cross-encoder for improved accuracy
-- **Smart Chunking**: Tree-sitter based AST-aware code chunking with 15+ chunk types
-- **Context Windows**: Surrounding code context (3 lines before/after each chunk)
-- **Rich Metadata**: Extracts signatures, docstrings, and context breadcrumbs
-- **Local Embeddings**: ONNX-powered embedding with fastembed (no API calls)
-- **Fast Vector Search**: arroy + LMDB for sub-second search after model load
-- **Live File Watching**: Incremental re-indexing on file changes
-- **HTTP Server Mode**: Background server with REST API
-- **MCP Server**: Claude Code integration via Model Context Protocol
-- **JSON Output**: Machine-readable output for scripting and AI agents
-- **Multi-Language**: Rust, Python, TypeScript, JavaScript (full AST support)
-- **Beautiful CLI**: Colored output, progress bars, multiple output modes
-- **Single Binary**: No Node.js required, just a static Rust binary
+- **Semantic Search** — Natural language queries that understand code meaning
+- **Hybrid Search** — Combines vector similarity + BM25 full-text search with RRF fusion
+- **Neural Reranking** — Optional second-pass reranking with Jina Reranker for higher accuracy
+- **Smart Chunking** — Tree-sitter AST-aware chunking that preserves functions, classes, methods
+- **Context Windows** — Shows surrounding code (3 lines before/after) for better understanding
+- **Local & Private** — All processing happens locally using ONNX models, no data leaves your machine
+- **Fast** — Sub-second search after initial model load, incremental indexing
+- **Multiple Interfaces** — CLI, HTTP server, and MCP server for Claude Code integration
+
+---
+
+## Table of Contents
+
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Command Reference](#command-reference)
+  - [search](#search)
+  - [index](#index)
+  - [serve](#serve)
+  - [mcp](#mcp)
+  - [stats](#stats)
+  - [clear](#clear)
+  - [list](#list)
+  - [doctor](#doctor)
+  - [setup](#setup)
+- [Global Options](#global-options)
+- [Search Modes](#search-modes)
+- [MCP Server (Claude Code)](#mcp-server-claude-code-integration)
+- [HTTP Server API](#http-server-api)
+- [Database Management](#database-management)
+- [Supported Languages](#supported-languages)
+- [Embedding Models](#embedding-models)
+- [Configuration](#configuration)
+- [How It Works](#how-it-works)
+- [Troubleshooting](#troubleshooting)
+
+---
 
 ## Installation
 
 ### Prerequisites
 
-**Linux (Ubuntu/Debian):**
+#### Linux (Ubuntu/Debian)
 ```bash
-sudo apt-get install protobuf-compiler libssl-dev pkg-config
+sudo apt-get update
+sudo apt-get install -y build-essential protobuf-compiler libssl-dev pkg-config
 ```
 
-**macOS:**
+#### Linux (Fedora/RHEL)
 ```bash
-brew install protobuf openssl
+sudo dnf install -y gcc protobuf-compiler openssl-devel pkg-config
 ```
 
-**Windows:**
+#### macOS
 ```bash
+brew install protobuf openssl pkg-config
+```
+
+#### Windows
+```powershell
+# Using winget
 winget install -e --id Google.Protobuf
+
+# Or using chocolatey
+choco install protoc
 ```
 
-### Building
+### Building from Source
 
 ```bash
-git clone https://github.com/yourusername/demongrep
+# Clone the repository
+git clone https://github.com/yourusername/demongrep.git
 cd demongrep
+
+# Build release binary
 cargo build --release
+
+# The binary is at target/release/demongrep
+# Optionally, copy to your PATH:
+sudo cp target/release/demongrep /usr/local/bin/
 ```
 
-The binary will be at `target/release/demongrep`.
+### Verify Installation
+
+```bash
+demongrep --version
+demongrep doctor  # Check system health
+```
+
+---
 
 ## Quick Start
 
 ```bash
-# Index current directory
+# 1. Navigate to your project
+cd /path/to/your/project
+
+# 2. Index the codebase (first time only, ~30-60s for medium projects)
 demongrep index
 
-# Search with natural language
+# 3. Search with natural language
 demongrep search "where do we handle authentication?"
 
-# Run background server with live file watching
-demongrep serve --port 3333
+# 4. Search with better accuracy (slower)
+demongrep search "error handling" --rerank
 ```
 
-## Usage
+---
 
-### Index a Codebase
+## Command Reference
+
+### search
+
+Search the codebase using natural language queries.
+
+```bash
+demongrep search <QUERY> [OPTIONS]
+```
+
+#### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `<QUERY>` | Natural language search query (e.g., "where do we handle authentication?") |
+
+#### Options
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--max-results` | `-m` | 25 | Maximum total results to return |
+| `--per-file` | | 1 | Maximum matches to show per file |
+| `--content` | `-c` | | Show full chunk content instead of snippets |
+| `--scores` | | | Show relevance scores and timing information |
+| `--compact` | | | Show file paths only (like `grep -l`) |
+| `--sync` | `-s` | | Re-index changed files before searching |
+| `--json` | | | Output results as JSON (for scripting/agents) |
+| `--path` | | `.` | Path to search in |
+| `--filter-path` | | | Only show results from files under this path (e.g., `src/`) |
+| `--vector-only` | | | Disable hybrid search, use vector similarity only |
+| `--rerank` | | | Enable neural reranking for better accuracy (~1.7s extra) |
+| `--rerank-top` | | 50 | Number of candidates to rerank |
+| `--rrf-k` | | 20 | RRF fusion parameter (higher = more weight to rank position) |
+
+#### Examples
+
+```bash
+# Basic search
+demongrep search "database connection pooling"
+
+# Show full code content with context
+demongrep search "error handling" --content
+
+# Get JSON output for scripting
+demongrep search "authentication" --json -m 10
+
+# Search only in src/api directory
+demongrep search "validation" --filter-path src/api
+
+# High-accuracy search with reranking
+demongrep search "complex algorithm" --rerank
+
+# Quick search with scores
+demongrep search "config loading" --scores
+
+# Re-index changed files, then search
+demongrep search "new feature" --sync
+
+# File paths only
+demongrep search "tests" --compact
+```
+
+---
+
+### index
+
+Index a codebase for semantic search.
+
+```bash
+demongrep index [PATH] [OPTIONS]
+```
+
+#### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `[PATH]` | Path to index (defaults to current directory) |
+
+#### Options
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--dry-run` | | Preview what would be indexed without indexing |
+| `--force` | `-f` | Delete existing index and rebuild from scratch |
+
+#### Examples
 
 ```bash
 # Index current directory
 demongrep index
 
-# Index specific path
+# Index a specific project
 demongrep index /path/to/project
 
-# Preview what would be indexed
+# Preview files to be indexed
 demongrep index --dry-run
 
-# Force re-index (clear and rebuild)
+# Force complete re-index (delete and rebuild)
 demongrep index --force
 
-# Use specific embedding model
-demongrep index --model minilm-l6-q
+# Index with a specific model
+demongrep index --model jina-code
 ```
 
-### Search with Natural Language
+#### What Gets Indexed
+
+- All text files respecting `.gitignore`
+- Custom ignore patterns from `.demongrepignore` or `.osgrepignore`
+- Skips binary files, `node_modules/`, `.git/`, etc.
+
+#### Index Location
+
+The index is stored in `.demongrep.db/` directory inside your project root.
+
+---
+
+### serve
+
+Run an HTTP server with live file watching for continuous indexing.
 
 ```bash
-# Basic search (hybrid by default: vector + BM25 with RRF fusion)
-demongrep search "where do we handle authentication?"
-
-# Enable neural reranking for better accuracy
-demongrep search "error handling" --rerank
-
-# Show relevance scores and timing
-demongrep search "error handling" --scores
-
-# Show full content with context windows
-demongrep search "database queries" --content
-
-# File paths only (like grep -l)
-demongrep search "vector embeddings" --compact
-
-# Limit results
-demongrep search "parsing" --max-results 10 --per-file 2
-
-# Filter to specific directory
-demongrep search "tests" --filter-path src/chunker
-
-# JSON output for scripting/agents
-demongrep search "authentication" --json
-
-# Vector-only search (disable hybrid BM25)
-demongrep search "query" --vector-only
-
-# Sync database before search (re-index changed files)
-demongrep search "my query" --sync
+demongrep serve [PATH] [OPTIONS]
 ```
 
-### Background Server
+#### Options
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--port` | `-p` | 4444 | Port to listen on |
+
+#### Examples
 
 ```bash
-# Start server with live file watching
+# Start server on default port (4444)
+demongrep serve
+
+# Start server on custom port
 demongrep serve --port 3333
 
-# Server endpoints:
-#   GET  /health - Health check
-#   GET  /status - Index statistics
-#   POST /search - Search API
+# Serve a specific project
+demongrep serve /path/to/project --port 8080
 ```
 
-**Search API:**
+The server automatically re-indexes files when they change (with 300ms debouncing).
+
+---
+
+### mcp
+
+Start an MCP (Model Context Protocol) server for Claude Code integration.
+
 ```bash
-curl -X POST http://localhost:3333/search \
+demongrep mcp [PATH]
+```
+
+#### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `[PATH]` | Path to project (defaults to current directory) |
+
+See [MCP Server section](#mcp-server-claude-code-integration) for detailed setup.
+
+---
+
+### stats
+
+Show statistics about the indexed database.
+
+```bash
+demongrep stats [PATH]
+```
+
+#### Output
+
+```
+📊 Database Statistics
+============================================================
+💾 Database: /path/to/project/.demongrep.db
+
+Vector Store:
+   Total chunks: 731
+   Total files: 45
+   Indexed: ✅ Yes
+   Dimensions: 384
+
+Storage:
+   Database size: 12.34 MB
+   Avg per chunk: 17.28 KB
+```
+
+---
+
+### clear
+
+Delete the index database.
+
+```bash
+demongrep clear [PATH] [OPTIONS]
+```
+
+#### Options
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--yes` | `-y` | Skip confirmation prompt |
+
+#### Examples
+
+```bash
+# Clear with confirmation
+demongrep clear
+
+# Clear without confirmation (for scripts)
+demongrep clear -y
+
+# Clear a specific project's index
+demongrep clear /path/to/project -y
+```
+
+---
+
+### list
+
+List all indexed repositories (searches for `.demongrep.db` directories).
+
+```bash
+demongrep list
+```
+
+---
+
+### doctor
+
+Check installation health and system requirements.
+
+```bash
+demongrep doctor
+```
+
+---
+
+### setup
+
+Pre-download embedding models.
+
+```bash
+demongrep setup [OPTIONS]
+```
+
+#### Options
+
+| Option | Description |
+|--------|-------------|
+| `--model` | Specific model to download (defaults to default model) |
+
+---
+
+## Global Options
+
+These options work with all commands:
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--verbose` | `-v` | Enable verbose/debug output |
+| `--quiet` | `-q` | Suppress informational output (only results/errors) |
+| `--model` | | Override embedding model |
+| `--store` | | Override store name |
+| `--help` | `-h` | Show help |
+| `--version` | `-V` | Show version |
+
+---
+
+## Search Modes
+
+demongrep supports three search modes with different accuracy/speed tradeoffs:
+
+### 1. Hybrid Search (Default)
+
+Combines vector similarity with BM25 full-text search using Reciprocal Rank Fusion (RRF).
+
+```bash
+demongrep search "query"
+```
+
+- **Speed**: ~75ms
+- **Best for**: Most queries, balances semantic understanding with keyword matching
+
+### 2. Vector-Only Search
+
+Pure semantic similarity search using embeddings.
+
+```bash
+demongrep search "query" --vector-only
+```
+
+- **Speed**: ~72ms
+- **Best for**: Conceptual queries where exact keywords don't matter
+
+### 3. Hybrid + Neural Reranking
+
+Two-stage search: hybrid retrieval followed by cross-encoder reranking.
+
+```bash
+demongrep search "query" --rerank
+```
+
+- **Speed**: ~1.8s (adds ~1.7s for reranking)
+- **Best for**: When accuracy matters more than speed
+
+---
+
+## MCP Server (Claude Code Integration)
+
+demongrep can act as an MCP server, allowing Claude Code to search your codebase.
+
+### Setup
+
+1. **Build demongrep** and note the binary path:
+   ```bash
+   cargo build --release
+   # Binary at: /path/to/demongrep/target/release/demongrep
+   ```
+
+2. **Index your project**:
+   ```bash
+   cd /path/to/your/project
+   demongrep index
+   ```
+
+3. **Configure Claude Code**
+
+   Edit `~/.config/claude-code/config.json` (Linux/Mac) or the appropriate config location:
+
+   ```json
+   {
+     "mcpServers": {
+       "demongrep": {
+         "command": "/absolute/path/to/demongrep",
+         "args": ["mcp", "/absolute/path/to/your/project"]
+       }
+     }
+   }
+   ```
+
+4. **Restart Claude Code**
+
+### Available MCP Tools
+
+| Tool | Parameters | Description |
+|------|------------|-------------|
+| `semantic_search` | `query`, `limit` | Search code semantically |
+| `get_file_chunks` | `path` | Get all indexed chunks from a file |
+| `index_status` | | Check if index exists and get stats |
+
+### Example MCP Usage in Claude Code
+
+Once configured, Claude Code can use commands like:
+- *"Search for authentication handling"*
+- *"Find all chunks in src/auth.rs"*
+- *"Check if the index is ready"*
+
+---
+
+## HTTP Server API
+
+### Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/health` | Health check (returns `{"status": "ok"}`) |
+| GET | `/status` | Index statistics |
+| POST | `/search` | Search the codebase |
+
+### Search API
+
+**Request:**
+```bash
+curl -X POST http://localhost:4444/search \
   -H "Content-Type: application/json" \
-  -d '{"query": "authentication", "limit": 10}'
+  -d '{
+    "query": "authentication",
+    "limit": 10
+  }'
 ```
 
-### MCP Server (Claude Code Integration)
-
-```bash
-# Start MCP server for Claude Code
-demongrep mcp
-
-# MCP server with specific project path
-demongrep mcp /path/to/project
-```
-
-**Available MCP Tools:**
-- `semantic_search(query, limit)` - Semantic code search
-- `get_file_chunks(path)` - Get all chunks from a file
-- `index_status()` - Check index health and stats
-
-**Claude Code Configuration** (`~/.claude/claude_desktop_config.json`):
+**Response:**
 ```json
 {
-  "mcpServers": {
-    "demongrep": {
-      "command": "/path/to/demongrep",
-      "args": ["mcp", "/path/to/project"]
+  "results": [
+    {
+      "path": "src/auth/handler.rs",
+      "start_line": 45,
+      "end_line": 67,
+      "kind": "Function",
+      "content": "pub fn authenticate(...) { ... }",
+      "score": 0.89,
+      "signature": "fn authenticate(credentials: &Credentials) -> Result<User>"
     }
-  }
+  ],
+  "query": "authentication",
+  "total_results": 1
 }
 ```
 
-### Manage Database
+---
+
+## Database Management
+
+### Index Location
+
+Each project has its own index at `<project_root>/.demongrep.db/`
+
+### Re-indexing
 
 ```bash
-# Show statistics
-demongrep stats
+# Incremental update (only changed files)
+demongrep search "query" --sync
 
-# List indexed repositories
-demongrep list
+# Or explicitly re-index
+demongrep index
 
-# Clear database
+# Full rebuild (delete and recreate)
+demongrep index --force
+```
+
+### Delete Index
+
+```bash
+# Interactive
 demongrep clear
-demongrep clear -y  # Skip confirmation
+
+# Non-interactive
+demongrep clear -y
+
+# Or manually
+rm -rf .demongrep.db/
 ```
 
-### Other Commands
+### Check Index Status
 
 ```bash
-# Check installation health
-demongrep doctor
-
-# Download embedding models
-demongrep setup
+demongrep stats
 ```
 
-## Performance
+---
 
-### Benchmarks vs osgrep
+## Supported Languages
 
-Tested on [sharkdp/bat](https://github.com/sharkdp/bat) repository (~400 files):
+### Full Semantic Chunking (Tree-sitter AST)
 
-| Metric | demongrep | osgrep |
-|--------|-----------|--------|
-| **Index Time** | 69s | 120s |
-| **Search Accuracy** | 83% | 0% |
-| **Speedup** | 1.7x faster | - |
+These languages have full AST-aware chunking that extracts functions, classes, methods, etc.:
 
-### Embedding Model Benchmarks
+| Language | Extensions |
+|----------|------------|
+| Rust | `.rs` |
+| Python | `.py`, `.pyw`, `.pyi` |
+| JavaScript | `.js`, `.mjs`, `.cjs` |
+| TypeScript | `.ts`, `.mts`, `.cts`, `.tsx`, `.jsx` |
 
-Tested on demongrep's codebase (~607 chunks, 9 semantic queries):
+### Indexed (Line-based Chunking)
 
-| Model | Accuracy | Query Time | Index Time |
-|-------|----------|------------|------------|
-| AllMiniLML6V2Q | **100%** | 1.8ms | 25s |
-| JinaEmbeddingsV2BaseCode | 89% | 10.5ms | 74s |
-| BGESmallENV15 (default) | 89% | ~2ms | ~30s |
+These languages are indexed with fallback line-based chunking:
 
-**Recommendations:**
-- Best accuracy: `minilm-l6-q` (AllMiniLML6V2Q)
-- Code-specific: `jina-code` (JinaEmbeddingsV2BaseCode)
-- Balanced default: `bge-small` (BGESmallENV15)
+| Language | Extensions |
+|----------|------------|
+| Go | `.go` |
+| Java | `.java` |
+| C | `.c`, `.h` |
+| C++ | `.cpp`, `.cc`, `.cxx`, `.hpp` |
+| C# | `.cs` |
+| Ruby | `.rb`, `.rake` |
+| PHP | `.php` |
+| Swift | `.swift` |
+| Kotlin | `.kt`, `.kts` |
+| Shell | `.sh`, `.bash`, `.zsh` |
+| Markdown | `.md`, `.markdown`, `.txt` |
+| JSON | `.json` |
+| YAML | `.yaml`, `.yml` |
+| TOML | `.toml` |
+| SQL | `.sql` |
+| HTML | `.html`, `.htm` |
+| CSS | `.css`, `.scss`, `.sass`, `.less` |
 
-## Available Models
+---
 
-| Model | Dimensions | Quality | Speed |
-|-------|------------|---------|-------|
-| `bge-small` (default) | 384 | Good | Fast |
-| `minilm-l6` | 384 | Best | Fastest |
-| `minilm-l6-q` | 384 | Best | Fastest (quantized) |
-| `jina-code` | 768 | Excellent for code | Medium |
-| `bge-base` | 768 | Better | Medium |
-| `mxbai-large` | 1024 | High quality | Slower |
+## Embedding Models
 
-Use `--model <name>` with index/search commands.
+### Available Models
 
-## Environment Variables
+| Name | ID | Dimensions | Speed | Quality | Best For |
+|------|-----|------------|-------|---------|----------|
+| MiniLM-L6 | `minilm-l6` | 384 | Fastest | Excellent | General use |
+| MiniLM-L6 (Q) | `minilm-l6-q` | 384 | Fastest | Excellent | **Default** |
+| MiniLM-L12 | `minilm-l12` | 384 | Fast | Better | Higher quality |
+| MiniLM-L12 (Q) | `minilm-l12-q` | 384 | Fast | Better | Higher quality |
+| BGE Small | `bge-small` | 384 | Fast | Good | General use |
+| BGE Small (Q) | `bge-small-q` | 384 | Fast | Good | General use |
+| BGE Base | `bge-base` | 768 | Medium | Better | Higher quality |
+| BGE Large | `bge-large` | 1024 | Slow | Best | Highest quality |
+| Jina Code | `jina-code` | 768 | Medium | Excellent | **Code-specific** |
+| Nomic v1.5 | `nomic-v1.5` | 768 | Medium | Good | Long context |
+| E5 Multilingual | `e5-multilingual` | 384 | Fast | Good | Non-English code |
+| MxBai Large | `mxbai-large` | 1024 | Slow | Excellent | High quality |
 
-| Variable | Description |
-|----------|-------------|
-| `DEMONGREP_BATCH_SIZE` | Override embedding batch size (default: auto) |
-| `RUST_LOG` | Logging level (`demongrep=debug`, etc.) |
+### Changing Models
+
+```bash
+# Index with specific model
+demongrep index --model jina-code
+
+# Search must use same model as index
+demongrep search "query" --model jina-code
+```
+
+**Note:** The model used for indexing is saved in metadata. If you search with a different model, you may get poor results. Use `--force` to re-index with a new model.
+
+---
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DEMONGREP_BATCH_SIZE` | Embedding batch size | Auto (based on model) |
+| `RUST_LOG` | Logging level | `demongrep=info` |
+
+### Ignore Files
+
+Create `.demongrepignore` in your project root:
+
+```gitignore
+# Ignore test fixtures
+**/fixtures/**
+**/testdata/**
+
+# Ignore generated code
+**/generated/**
+*.generated.ts
+
+# Ignore large files
+*.min.js
+*.bundle.js
+```
+
+demongrep also respects `.gitignore` and `.osgrepignore` files.
+
+---
 
 ## How It Works
 
 ### 1. File Discovery
-- Walks directory respecting `.gitignore`
-- Supports custom `.demongrepignore` and `.osgrepignore` files
-- Detects 21+ languages from file extensions
+- Walks directory respecting `.gitignore` and custom ignore files
+- Detects language from file extensions
 - Skips binary files automatically
 
 ### 2. Semantic Chunking
-- Parses code with tree-sitter (native Rust, not WASM)
-- Extracts functions, classes, methods, structs, enums, traits, impls
-- Preserves signatures, docstrings, and context breadcrumbs
-- Falls back to sliding window for unsupported languages
+- Parses code with tree-sitter (native Rust implementation)
+- Extracts semantic units: functions, classes, methods, structs, traits, impls
+- Preserves metadata: signatures, docstrings, context breadcrumbs
+- Falls back to line-based chunking for unsupported languages
 
 ### 3. Embedding Generation
 - Uses fastembed with ONNX Runtime (CPU-optimized)
-- Batched processing with adaptive batch sizes
-- SHA-256 content-based change detection
+- Batched processing for efficiency
+- SHA-256 content hashing for change detection
 
 ### 4. Vector Storage
 - arroy for approximate nearest neighbor search
 - LMDB for ACID transactions and persistence
 - Single `.demongrep.db/` directory per project
 
-### 5. Incremental Updates
-- Two-level change detection: mtime + SHA-256 hash
-- Tracks chunk IDs per file for efficient deletion
-- Live file watching with 300ms debouncing
+### 5. Search
+- Query embedding → Vector search → BM25 search → RRF fusion → (Optional) Reranking
 
-## Architecture
+---
 
-```
-demongrep/
-├── src/
-│   ├── main.rs           # Entry point
-│   ├── cli/              # CLI commands (clap)
-│   ├── file/             # File discovery, language detection, binary detection
-│   ├── chunker/          # Tree-sitter semantic chunking
-│   │   ├── semantic.rs   # AST-based chunking
-│   │   ├── extractor.rs  # Language-specific extractors
-│   │   ├── grammar.rs    # Tree-sitter grammar manager
-│   │   └── fallback.rs   # Sliding window fallback
-│   ├── embed/            # ONNX embedding service
-│   ├── vectordb/         # arroy + LMDB vector store
-│   ├── cache/            # File metadata store (hash tracking)
-│   ├── watch/            # File watcher (notify crate)
-│   ├── server/           # HTTP server (axum)
-│   ├── search/           # Search with --sync support
-│   └── index/            # Indexing workflow
-└── examples/             # Demo programs
+## Troubleshooting
+
+### "No database found"
+
+```bash
+# Index the project first
+demongrep index
 ```
 
-## Comparison with osgrep
+### Search returns poor results
 
-| Feature | osgrep | demongrep |
-|---------|--------|-----------|
-| Language | TypeScript | Rust |
-| Tree-sitter | WASM (downloads) | Native (compiled-in) |
-| Startup | ~100ms | <1ms |
-| Parse speed | 1x | 3-5x faster |
-| Chunk types | 3 | 15+ |
-| Signatures | No | Yes |
-| Docstrings | Inline | Separate field |
-| Change detection | SHA256 | mtime + SHA256 |
-| Live watching | Yes | Yes |
-| HTTP server | Yes | Yes |
-| Vector DB | LanceDB | arroy + LMDB |
-| Hybrid search | Yes (RRF) | Yes (RRF) |
-| Reranking | Yes | Yes (Jina Reranker) |
-| MCP server | No | Yes |
-| JSON output | Yes | Yes |
-| Context windows | No | Yes |
-| Build deps | npm, cmake | cargo only |
+1. **Check if index is stale:**
+   ```bash
+   demongrep search "query" --sync
+   ```
+
+2. **Try different search mode:**
+   ```bash
+   demongrep search "query" --rerank
+   ```
+
+3. **Rebuild index:**
+   ```bash
+   demongrep index --force
+   ```
+
+### Model mismatch warning
+
+If you indexed with one model and search with another:
+```bash
+# Re-index with the model you want to use
+demongrep index --force --model minilm-l6-q
+```
+
+### Out of memory during indexing
+
+```bash
+# Reduce batch size
+DEMONGREP_BATCH_SIZE=32 demongrep index
+```
+
+### Server won't start (port in use)
+
+```bash
+# Use a different port
+demongrep serve --port 5555
+```
+
+---
 
 ## Development
 
@@ -327,16 +762,20 @@ cargo fmt
 cargo clippy
 ```
 
-### Logging
+### Debug Logging
 
 ```bash
-RUST_LOG=demongrep=debug cargo run -- search "query"
-RUST_LOG=demongrep::embed=trace cargo run -- index
+RUST_LOG=demongrep=debug demongrep search "query"
+RUST_LOG=demongrep::embed=trace demongrep index
 ```
+
+---
 
 ## License
 
 Apache-2.0
+
+---
 
 ## Contributing
 
