@@ -266,6 +266,100 @@ impl VectorStore {
         })
     }
 
+    /// Delete chunks by their IDs
+    ///
+    /// Returns the number of chunks deleted
+    pub fn delete_chunks(&mut self, chunk_ids: &[u32]) -> Result<usize> {
+        if chunk_ids.is_empty() {
+            return Ok(0);
+        }
+
+        let mut wtxn = self.env.write_txn()?;
+        let writer = Writer::new(self.vectors, 0, self.dimensions);
+
+        let mut deleted = 0;
+        for &id in chunk_ids {
+            // Delete from vector database
+            if writer.del_item(&mut wtxn, id).is_ok() {
+                deleted += 1;
+            }
+            // Delete from metadata
+            self.chunks.delete(&mut wtxn, &id)?;
+        }
+
+        wtxn.commit()?;
+
+        // Mark as needing re-index
+        if deleted > 0 {
+            self.indexed = false;
+        }
+
+        Ok(deleted)
+    }
+
+    /// Delete all chunks from a specific file
+    ///
+    /// Returns the IDs of deleted chunks
+    pub fn delete_file_chunks(&mut self, file_path: &str) -> Result<Vec<u32>> {
+        // First, find all chunk IDs for this file
+        let rtxn = self.env.read_txn()?;
+        let mut chunk_ids = Vec::new();
+
+        for result in self.chunks.iter(&rtxn)? {
+            let (id, metadata) = result?;
+            if metadata.path == file_path {
+                chunk_ids.push(id);
+            }
+        }
+        drop(rtxn);
+
+        if chunk_ids.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Delete the chunks
+        self.delete_chunks(&chunk_ids)?;
+
+        Ok(chunk_ids)
+    }
+
+    /// Insert chunks and return their assigned IDs
+    ///
+    /// Useful for tracking which chunks belong to which file
+    pub fn insert_chunks_with_ids(&mut self, chunks: Vec<EmbeddedChunk>) -> Result<Vec<u32>> {
+        if chunks.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let start_id = self.next_id;
+        let mut wtxn = self.env.write_txn()?;
+        let writer = Writer::new(self.vectors, 0, self.dimensions);
+
+        for chunk in &chunks {
+            let id = self.next_id;
+
+            if chunk.embedding.len() != self.dimensions {
+                return Err(anyhow!(
+                    "Embedding dimension mismatch: expected {}, got {}",
+                    self.dimensions,
+                    chunk.embedding.len()
+                ));
+            }
+
+            writer.add_item(&mut wtxn, id, &chunk.embedding)?;
+            let metadata = ChunkMetadata::from_embedded_chunk(chunk);
+            self.chunks.put(&mut wtxn, &id, &metadata)?;
+
+            self.next_id += 1;
+        }
+
+        wtxn.commit()?;
+        self.indexed = false;
+
+        let ids: Vec<u32> = (start_id..self.next_id).collect();
+        Ok(ids)
+    }
+
     /// Clear all data from the database
     pub fn clear(&mut self) -> Result<()> {
         println!("🗑️  Clearing database...");

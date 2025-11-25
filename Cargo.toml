@@ -101,3 +101,8 @@ strip = true
 
 [profile.bench]
 inherits = "release"
+
+[features]
+default = []
+cuda = ["ort/cuda"]        # Enable CUDA GPU acceleration (requires cuDNN)
+tensorrt = ["ort/tensorrt"] # Enable TensorRT acceleration (NVIDIA only)

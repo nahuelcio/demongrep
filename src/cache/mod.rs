@@ -1,3 +1,7 @@
+mod file_meta;
+
+pub use file_meta::{FileMeta, FileMetaStore, FileMetaStats};
+
 use moka::sync::Cache;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;

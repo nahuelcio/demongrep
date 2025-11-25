@@ -2,6 +2,8 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
+use crate::embed::ModelType;
+
 /// Fast, local semantic code search powered by Rust
 #[derive(Parser, Debug)]
 #[command(name = "demongrep")]
@@ -17,6 +19,13 @@ pub struct Cli {
     /// Override default store name
     #[arg(long, global = true)]
     pub store: Option<String>,
+
+    /// Embedding model to use (e.g., bge-small, minilm-l6-q, jina-code)
+    /// Available: minilm-l6, minilm-l6-q, minilm-l12, minilm-l12-q, paraphrase-minilm,
+    ///            bge-small, bge-small-q, bge-base, nomic-v1, nomic-v1.5, nomic-v1.5-q,
+    ///            jina-code, e5-multilingual, mxbai-large, modernbert-large
+    #[arg(long, global = true)]
+    pub model: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -116,6 +125,16 @@ pub enum Commands {
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
 
+    // Parse model from CLI flag
+    let model_type = cli.model.as_ref().and_then(|m| ModelType::from_str(m));
+    if cli.model.is_some() && model_type.is_none() {
+        eprintln!("Unknown model: '{}'. Available models:", cli.model.as_ref().unwrap());
+        eprintln!("  minilm-l6, minilm-l6-q, minilm-l12, minilm-l12-q, paraphrase-minilm");
+        eprintln!("  bge-small, bge-small-q, bge-base, nomic-v1, nomic-v1.5, nomic-v1.5-q");
+        eprintln!("  jina-code, e5-multilingual, mxbai-large, modernbert-large");
+        std::process::exit(1);
+    }
+
     match cli.command {
         Commands::Search {
             query,
@@ -138,6 +157,7 @@ pub async fn run() -> Result<()> {
                 sync,
                 json,
                 path,
+                model_type,
             )
             .await
         }
@@ -145,7 +165,7 @@ pub async fn run() -> Result<()> {
             path,
             dry_run,
             force,
-        } => crate::index::index(path, dry_run, force).await,
+        } => crate::index::index(path, dry_run, force, model_type).await,
         Commands::Serve { port, path } => crate::server::serve(port, path).await,
         Commands::List => crate::index::list().await,
         Commands::Stats { path } => crate::index::stats(path).await,

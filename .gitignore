@@ -17,6 +17,8 @@ Thumbs.db
 
 # Project specific
 /.demongrep/
+.demongrep.db/
+.fastembed_cache/
 /data/
 *.log
 

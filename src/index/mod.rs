@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crate::chunker::SemanticChunker;
-use crate::embed::EmbeddingService;
+use crate::embed::{EmbeddingService, ModelType};
 use crate::file::FileWalker;
 use crate::vectordb::VectorStore;
 
@@ -19,14 +19,16 @@ fn get_db_path(path: Option<PathBuf>) -> Result<PathBuf> {
 }
 
 /// Index a repository
-pub async fn index(path: Option<PathBuf>, dry_run: bool, force: bool) -> Result<()> {
+pub async fn index(path: Option<PathBuf>, dry_run: bool, force: bool, model: Option<ModelType>) -> Result<()> {
     let project_path = path.clone().unwrap_or_else(|| PathBuf::from("."));
     let db_path = get_db_path(path)?;
+    let model_type = model.unwrap_or_default();
 
     println!("{}", "🚀 Demongrep Indexer".bright_cyan().bold());
     println!("{}", "=".repeat(60));
     println!("📂 Project: {}", project_path.display());
     println!("💾 Database: {}", db_path.display());
+    println!("🧠 Model: {} ({} dims)", model_type.name(), model_type.dimensions());
 
     if dry_run {
         println!("\n{}", "🔍 DRY RUN MODE".bright_yellow());
@@ -85,14 +87,28 @@ pub async fn index(path: Option<PathBuf>, dry_run: bool, force: bool) -> Result<
             .progress_chars("█▓▒░ "),
     );
 
+    let mut skipped_files = 0;
     for file in &files {
         pb.set_message(format!("{}", file.path.file_name().unwrap().to_string_lossy()));
 
-        let source_code = std::fs::read_to_string(&file.path)?;
+        // Skip files that aren't valid UTF-8
+        let source_code = match std::fs::read_to_string(&file.path) {
+            Ok(content) => content,
+            Err(_) => {
+                skipped_files += 1;
+                pb.inc(1);
+                continue;
+            }
+        };
+
         let chunks = chunker.chunk_semantic(file.language, &file.path, &source_code)?;
         all_chunks.extend(chunks);
 
         pb.inc(1);
+    }
+
+    if skipped_files > 0 {
+        println!("   ⚠️  Skipped {} files (invalid UTF-8)", skipped_files);
     }
 
     pb.finish_with_message("Done!");
@@ -112,8 +128,8 @@ pub async fn index(path: Option<PathBuf>, dry_run: bool, force: bool) -> Result<
     let start = Instant::now();
     println!("🔄 Initializing embedding model...");
 
-    let mut embedding_service = EmbeddingService::new()?;
-    println!("✅ Model loaded: {} dimensions", embedding_service.dimensions());
+    let mut embedding_service = EmbeddingService::with_model(model_type)?;
+    println!("✅ Model loaded: {} ({} dims)", embedding_service.model_name(), embedding_service.dimensions());
 
     println!("\n🔄 Generating embeddings for {} chunks...", all_chunks.len());
     let embedded_chunks = embedding_service.embed_chunks(all_chunks)?;
@@ -145,6 +161,19 @@ pub async fn index(path: Option<PathBuf>, dry_run: bool, force: bool) -> Result<
     let storage_duration = start.elapsed();
 
     println!("✅ Index built in {:?}", storage_duration);
+
+    // Save model metadata
+    let metadata = serde_json::json!({
+        "model_short_name": embedding_service.model_short_name(),
+        "model_name": embedding_service.model_name(),
+        "dimensions": embedding_service.dimensions(),
+        "indexed_at": chrono::Utc::now().to_rfc3339(),
+    });
+    std::fs::write(
+        db_path.join("metadata.json"),
+        serde_json::to_string_pretty(&metadata)?
+    )?;
+    println!("✅ Metadata saved");
 
     // Show final stats
     let db_stats = store.stats()?;

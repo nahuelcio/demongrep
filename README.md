@@ -1,60 +1,40 @@
 # demongrep
 
-Fast, local semantic code search powered by Rust - a high-performance alternative to osgrep.
+Fast, local semantic code search powered by Rust. A high-performance alternative to osgrep.
 
-## Features (Planned)
+## Features
 
 - **Semantic Search**: Natural language queries like "where do we handle authentication?"
-- **Incremental Indexing**: Only re-index changed files, not the entire codebase
-- **Smart Chunking**: Tree-sitter based AST-aware code chunking
-- **Multi-Model Support**: Pluggable embedding models (mxbai-embed-xsmall-v1, nomic-embed, bge-small)
-- **GPU Acceleration**: CUDA and DirectML support via ONNX Runtime
-- **Memory-Aware Cache**: LRU cache with configurable memory limits
-- **VectorDB Abstraction**: Support for LanceDB, Qdrant, and Milvus
-- **Hybrid Search**: Combines vector similarity with BM25/FTS using RRF
+- **Smart Chunking**: Tree-sitter based AST-aware code chunking with 15+ chunk types
+- **Rich Metadata**: Extracts signatures, docstrings, and context breadcrumbs
+- **Local Embeddings**: ONNX-powered embedding with fastembed (no API calls)
+- **Fast Vector Search**: arroy + LMDB for sub-second search after model load
+- **Live File Watching**: Incremental re-indexing on file changes
+- **HTTP Server Mode**: Background server with REST API
+- **Multi-Language**: Rust, Python, TypeScript, JavaScript, Go, Java, C, C++, and more
+- **Beautiful CLI**: Colored output, progress bars, multiple output modes
 - **Single Binary**: No Node.js required, just a static Rust binary
-- **Background Server**: Hot daemon with file watching for instant results
 
-## Installation Prerequisites
+## Installation
 
-Before building demongrep, you need to install some system dependencies:
+### Prerequisites
 
-### Protocol Buffers Compiler (protoc)
-
-LanceDB requires the Protocol Buffers compiler. Install it based on your OS:
-
-**Windows:**
+**Linux (Ubuntu/Debian):**
 ```bash
-# Using winget
-winget install -e --id Google.Protobuf
-
-# Or download from:
-# https://github.com/protocolbuffers/protobuf/releases
+sudo apt-get install protobuf-compiler libssl-dev pkg-config
 ```
 
 **macOS:**
 ```bash
-brew install protobuf
+brew install protobuf openssl
 ```
 
-**Linux:**
+**Windows:**
 ```bash
-# Ubuntu/Debian
-sudo apt-get install protobuf-compiler
-
-# Fedora
-sudo dnf install protobuf-compiler
-
-# Arch Linux
-sudo pacman -S protobuf
+winget install -e --id Google.Protobuf
 ```
 
-Verify installation:
-```bash
-protoc --version
-```
-
-## Building
+### Building
 
 ```bash
 git clone https://github.com/yourusername/demongrep
@@ -62,7 +42,9 @@ cd demongrep
 cargo build --release
 ```
 
-## Usage (Coming Soon)
+The binary will be at `target/release/demongrep`.
+
+## Quick Start
 
 ```bash
 # Index current directory
@@ -71,110 +53,239 @@ demongrep index
 # Search with natural language
 demongrep search "where do we handle authentication?"
 
-# Run background server
-demongrep serve
+# Run background server with live file watching
+demongrep serve --port 3333
+```
 
-# Download embedding models
-demongrep setup
+## Usage
 
-# Check health
-demongrep doctor
+### Index a Codebase
+
+```bash
+# Index current directory
+demongrep index
+
+# Index specific path
+demongrep index /path/to/project
+
+# Preview what would be indexed
+demongrep index --dry-run
+
+# Force re-index (clear and rebuild)
+demongrep index --force
+
+# Use specific embedding model
+demongrep index --model minilm-l6-q
+```
+
+### Search with Natural Language
+
+```bash
+# Basic search
+demongrep search "where do we handle authentication?"
+
+# Show relevance scores and timing
+demongrep search "error handling" --scores
+
+# Show full content instead of snippets
+demongrep search "database queries" --content
+
+# File paths only (like grep -l)
+demongrep search "vector embeddings" --compact
+
+# Limit results
+demongrep search "parsing" --max-results 10 --per-file 2
+
+# Sync database before search (re-index changed files)
+demongrep search "my query" --sync
+```
+
+### Background Server
+
+```bash
+# Start server with live file watching
+demongrep serve --port 3333
+
+# Server endpoints:
+#   GET  /health - Health check
+#   GET  /status - Index statistics
+#   POST /search - Search API
+```
+
+**Search API:**
+```bash
+curl -X POST http://localhost:3333/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "authentication", "limit": 10}'
+```
+
+### Manage Database
+
+```bash
+# Show statistics
+demongrep stats
 
 # List indexed repositories
 demongrep list
+
+# Clear database
+demongrep clear
+demongrep clear -y  # Skip confirmation
 ```
 
-## Project Structure
+### Other Commands
+
+```bash
+# Check installation health
+demongrep doctor
+
+# Download embedding models
+demongrep setup
+```
+
+## Performance
+
+### Benchmarks vs osgrep
+
+Tested on [sharkdp/bat](https://github.com/sharkdp/bat) repository (~400 files):
+
+| Metric | demongrep | osgrep |
+|--------|-----------|--------|
+| **Index Time** | 69s | 120s |
+| **Search Accuracy** | 83% | 0% |
+| **Speedup** | 1.7x faster | - |
+
+### Embedding Model Benchmarks
+
+Tested on demongrep's codebase (~607 chunks, 9 semantic queries):
+
+| Model | Accuracy | Query Time | Index Time |
+|-------|----------|------------|------------|
+| AllMiniLML6V2Q | **100%** | 1.8ms | 25s |
+| JinaEmbeddingsV2BaseCode | 89% | 10.5ms | 74s |
+| BGESmallENV15 (default) | 89% | ~2ms | ~30s |
+
+**Recommendations:**
+- Best accuracy: `minilm-l6-q` (AllMiniLML6V2Q)
+- Code-specific: `jina-code` (JinaEmbeddingsV2BaseCode)
+- Balanced default: `bge-small` (BGESmallENV15)
+
+## Available Models
+
+| Model | Dimensions | Quality | Speed |
+|-------|------------|---------|-------|
+| `bge-small` (default) | 384 | Good | Fast |
+| `minilm-l6` | 384 | Best | Fastest |
+| `minilm-l6-q` | 384 | Best | Fastest (quantized) |
+| `jina-code` | 768 | Excellent for code | Medium |
+| `bge-base` | 768 | Better | Medium |
+| `mxbai-large` | 1024 | High quality | Slower |
+
+Use `--model <name>` with index/search commands.
+
+## Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `DEMONGREP_BATCH_SIZE` | Override embedding batch size (default: auto) |
+| `RUST_LOG` | Logging level (`demongrep=debug`, etc.) |
+
+## How It Works
+
+### 1. File Discovery
+- Walks directory respecting `.gitignore`
+- Supports custom `.demongrepignore` and `.osgrepignore` files
+- Detects 21+ languages from file extensions
+- Skips binary files automatically
+
+### 2. Semantic Chunking
+- Parses code with tree-sitter (native Rust, not WASM)
+- Extracts functions, classes, methods, structs, enums, traits, impls
+- Preserves signatures, docstrings, and context breadcrumbs
+- Falls back to sliding window for unsupported languages
+
+### 3. Embedding Generation
+- Uses fastembed with ONNX Runtime (CPU-optimized)
+- Batched processing with adaptive batch sizes
+- SHA-256 content-based change detection
+
+### 4. Vector Storage
+- arroy for approximate nearest neighbor search
+- LMDB for ACID transactions and persistence
+- Single `.demongrep.db/` directory per project
+
+### 5. Incremental Updates
+- Two-level change detection: mtime + SHA-256 hash
+- Tracks chunk IDs per file for efficient deletion
+- Live file watching with 300ms debouncing
+
+## Architecture
 
 ```
 demongrep/
 ├── src/
-│   ├── main.rs              # Entry point
-│   ├── cli/                 # CLI commands & argument parsing
-│   ├── config/              # Configuration management
-│   ├── file/                # File walking and filtering
-│   ├── chunker/             # Tree-sitter based code chunking
-│   ├── embed/               # Embedding models (ONNX)
-│   ├── rerank/              # Reranking strategies (RRF, cross-encoder)
-│   ├── vectordb/            # Vector database abstraction
-│   ├── cache/               # LRU cache for embeddings
-│   ├── index/               # Indexing logic
-│   ├── search/              # Search and ranking
-│   ├── watch/               # File watching for incremental updates
-│   ├── server/              # HTTP server
-│   └── bench/               # Benchmarking framework
-├── benches/                 # Criterion benchmarks
-├── tests/                   # Integration tests
-└── Cargo.toml
+│   ├── main.rs           # Entry point
+│   ├── cli/              # CLI commands (clap)
+│   ├── file/             # File discovery, language detection, binary detection
+│   ├── chunker/          # Tree-sitter semantic chunking
+│   │   ├── semantic.rs   # AST-based chunking
+│   │   ├── extractor.rs  # Language-specific extractors
+│   │   ├── grammar.rs    # Tree-sitter grammar manager
+│   │   └── fallback.rs   # Sliding window fallback
+│   ├── embed/            # ONNX embedding service
+│   ├── vectordb/         # arroy + LMDB vector store
+│   ├── cache/            # File metadata store (hash tracking)
+│   ├── watch/            # File watcher (notify crate)
+│   ├── server/           # HTTP server (axum)
+│   ├── search/           # Search with --sync support
+│   └── index/            # Indexing workflow
+└── examples/             # Demo programs
 ```
 
-## Architecture
+## Comparison with osgrep
 
-### Key Improvements Over osgrep
+| Feature | osgrep | demongrep |
+|---------|--------|-----------|
+| Language | TypeScript | Rust |
+| Tree-sitter | WASM (downloads) | Native (compiled-in) |
+| Startup | ~100ms | <1ms |
+| Parse speed | 1x | 3-5x faster |
+| Chunk types | 3 | 15+ |
+| Signatures | No | Yes |
+| Docstrings | Inline | Separate field |
+| Change detection | SHA256 | mtime + SHA256 |
+| Live watching | Yes | Yes |
+| HTTP server | Yes | Yes |
+| Vector DB | LanceDB | arroy + LMDB |
+| Hybrid search | Yes (RRF) | Planned |
+| Reranking | Yes | Planned |
+| Build deps | npm, cmake | cargo only |
 
-1. **Incremental Indexing**: Track file-to-chunk mappings, only re-index changed files
-2. **Smart Chunking**: AST-aware boundaries that preserve complete functions/classes
-3. **Memory-Aware Cache**: Moka-based LRU with memory limits and hit-rate tracking
-4. **GPU Support**: ONNX Runtime with CUDA/DirectML acceleration
-5. **Multi-Backend**: Abstraction layer supports multiple vector databases
-6. **Comprehensive Benchmarks**: Quality metrics (precision@k, NDCG) + performance
-7. **Zero Dependencies**: Single static binary, no Node.js runtime
+## Development
 
-### Components
+```bash
+# Debug build
+cargo build
 
-#### Chunking Strategy
-- Uses tree-sitter to identify semantic boundaries (functions, classes, methods)
-- Preserves docstrings with code
-- Metadata-rich chunks (knows chunk type: function, class, etc.)
-- Fallback for unsupported languages (sliding window)
+# Release build
+cargo build --release
 
-#### Embedding
-- ONNX Runtime for model inference
-- Batched processing for efficiency
-- Deduplication of identical chunks (common boilerplate)
-- Support for multiple models via HuggingFace Hub
+# Run tests
+cargo test
 
-#### Vector Database
-- Pluggable backend system
-- LanceDB: Fast embedded vector DB
-- Qdrant: High-performance vector search engine
-- Milvus: Scalable vector database
+# Format code
+cargo fmt
 
-#### Search
-- Vector similarity search
-- Hybrid search with BM25 (via Tantivy)
-- Reciprocal Rank Fusion (RRF) for result combination
-- Optional cross-encoder reranking
+# Lint
+cargo clippy
+```
 
-## Development Status
+### Logging
 
-🚧 **Currently in early development** 🚧
-
-- [x] Project structure and module skeleton
-- [x] CLI framework with clap
-- [x] Configuration system
-- [x] File walker with .gitignore support
-- [ ] Tree-sitter integration
-- [ ] ONNX embedding pipeline
-- [ ] LanceDB integration
-- [ ] Search implementation
-- [ ] Incremental indexing
-- [ ] File watching
-- [ ] HTTP server
-- [ ] Benchmarking suite
-
-## Benchmarking Plan
-
-Once implemented, we'll benchmark:
-
-1. **Model Comparison**: Quality (precision@k, NDCG) vs Speed vs Memory
-2. **Device Comparison**: CPU vs CUDA vs DirectML
-3. **VectorDB Comparison**: Index time, query latency, memory usage
-4. **Scalability**: 100K LOC, 1M LOC, 30M LOC repositories
-
-## Inspiration
-
-This project builds upon ideas from [osgrep](https://github.com/Ryandonofrio3/osgrep) and [mgrep](https://github.com/mixedbread-ai/mgrep), reimagining semantic code search in Rust for maximum performance.
+```bash
+RUST_LOG=demongrep=debug cargo run -- search "query"
+RUST_LOG=demongrep::embed=trace cargo run -- index
+```
 
 ## License
 
@@ -182,4 +293,4 @@ Apache-2.0
 
 ## Contributing
 
-Contributions welcome! This is an early-stage project with lots of opportunities to contribute.
+Contributions welcome! See [TODO.md](TODO.md) for planned features.

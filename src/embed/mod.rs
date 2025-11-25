@@ -61,6 +61,16 @@ impl EmbeddingService {
         self.model_type.name()
     }
 
+    /// Get model type
+    pub fn model_type(&self) -> ModelType {
+        self.model_type
+    }
+
+    /// Get model short name (for storage)
+    pub fn model_short_name(&self) -> &str {
+        self.model_type.short_name()
+    }
+
     /// Get cache statistics
     pub fn cache_stats(&self) -> CacheStats {
         self.cached_embedder.cache_stats()

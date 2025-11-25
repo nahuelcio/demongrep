@@ -3,7 +3,10 @@ use colored::Colorize;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use crate::embed::EmbeddingService;
+use crate::cache::FileMetaStore;
+use crate::chunker::SemanticChunker;
+use crate::embed::{EmbeddingService, ModelType};
+use crate::file::FileWalker;
 use crate::vectordb::VectorStore;
 
 /// Get the database path for a given project directory
@@ -12,6 +15,19 @@ fn get_db_path(path: Option<PathBuf>) -> Result<PathBuf> {
     let canonical_path = project_path.canonicalize()?;
 
     Ok(canonical_path.join(".demongrep.db"))
+}
+
+/// Read model metadata from database
+fn read_metadata(db_path: &PathBuf) -> Option<(String, usize)> {
+    let metadata_path = db_path.join("metadata.json");
+    if let Ok(content) = std::fs::read_to_string(&metadata_path) {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+            let model = json.get("model_short_name")?.as_str()?.to_string();
+            let dims = json.get("dimensions")?.as_u64()? as usize;
+            return Some((model, dims));
+        }
+    }
+    None
 }
 
 /// Search the codebase
@@ -26,6 +42,7 @@ pub async fn search(
     sync: bool,
     json: bool,
     path: Option<PathBuf>,
+    model_override: Option<ModelType>,
 ) -> Result<()> {
     let db_path = get_db_path(path)?;
 
@@ -35,19 +52,38 @@ pub async fn search(
         return Ok(());
     }
 
+    // Read model metadata from database FIRST (needed for sync)
+    let (model_type, dimensions) = if let Some(override_model) = model_override {
+        // User specified a model - use it (warning: may not match indexed data!)
+        (override_model, override_model.dimensions())
+    } else if let Some((model_name, dims)) = read_metadata(&db_path) {
+        // Use model from metadata
+        if let Some(mt) = ModelType::from_str(&model_name) {
+            (mt, dims)
+        } else {
+            // Model name not recognized, fall back to default
+            eprintln!("{}", "⚠️  Unknown model in metadata, using default".yellow());
+            (ModelType::default(), 384)
+        }
+    } else {
+        // No metadata, fall back to default
+        (ModelType::default(), 384)
+    };
+
+    // Perform incremental sync if requested (after we know the model)
     if sync {
-        println!("{}", "🔄 Syncing database (not implemented yet)...".yellow());
-        // TODO: Implement incremental re-indexing
+        println!("{}", "🔄 Syncing database...".yellow());
+        sync_database(&db_path, model_type)?;
     }
 
     // Load database
     let start = Instant::now();
-    let store = VectorStore::new(&db_path, 384)?; // TODO: Get dimensions from metadata
+    let store = VectorStore::new(&db_path, dimensions)?;
     let load_duration = start.elapsed();
 
-    // Initialize embedding service
+    // Initialize embedding service with the correct model
     let start = Instant::now();
-    let mut embedding_service = EmbeddingService::new()?;
+    let mut embedding_service = EmbeddingService::with_model(model_type)?;
     let model_load_duration = start.elapsed();
 
     // Embed query
@@ -134,6 +170,83 @@ pub async fn search(
         for result in &results {
             print_result(result, true, content, scores)?;
         }
+    }
+
+    Ok(())
+}
+
+/// Sync database by re-indexing changed files
+fn sync_database(db_path: &PathBuf, model_type: ModelType) -> Result<()> {
+    let project_path = db_path.parent().unwrap_or(std::path::Path::new("."));
+
+    // Load file metadata store
+    let mut file_meta = FileMetaStore::load_or_create(db_path, model_type.short_name(), model_type.dimensions())?;
+
+    // Walk the file system
+    let walker = FileWalker::new(project_path.to_path_buf());
+    let (files, _stats) = walker.walk()?;
+
+    // Initialize services
+    let mut embedding_service = EmbeddingService::with_model(model_type)?;
+    let mut chunker = SemanticChunker::new(100, 2000, 10);
+    let mut store = VectorStore::new(db_path, model_type.dimensions())?;
+
+    let mut changes = 0;
+
+    // Check for changed files
+    for file in &files {
+        let (needs_reindex, old_chunk_ids) = file_meta.check_file(&file.path)?;
+
+        if !needs_reindex {
+            continue;
+        }
+
+        changes += 1;
+        println!("  📝 {}", file.path.display());
+
+        // Delete old chunks
+        if !old_chunk_ids.is_empty() {
+            store.delete_chunks(&old_chunk_ids)?;
+        }
+
+        // Read and chunk file
+        let source_code = match std::fs::read_to_string(&file.path) {
+            Ok(content) => content,
+            Err(_) => continue,
+        };
+
+        let chunks = chunker.chunk_semantic(file.language, &file.path, &source_code)?;
+
+        if chunks.is_empty() {
+            file_meta.update_file(&file.path, vec![])?;
+            continue;
+        }
+
+        // Embed and insert
+        let embedded_chunks = embedding_service.embed_chunks(chunks)?;
+        let chunk_ids = store.insert_chunks_with_ids(embedded_chunks)?;
+        file_meta.update_file(&file.path, chunk_ids)?;
+    }
+
+    // Check for deleted files
+    let deleted_files = file_meta.find_deleted_files();
+    for (path, chunk_ids) in &deleted_files {
+        changes += 1;
+        println!("  🗑️  {} (deleted)", path);
+        if !chunk_ids.is_empty() {
+            store.delete_chunks(chunk_ids)?;
+        }
+        file_meta.remove_file(std::path::Path::new(path));
+    }
+
+    // Rebuild index if changes were made
+    if changes > 0 {
+        println!("  🔨 Rebuilding index...");
+        store.build_index()?;
+        file_meta.save(db_path)?;
+        println!("  ✅ {} file(s) synced", changes);
+    } else {
+        println!("  ✅ Already up to date");
     }
 
     Ok(())
