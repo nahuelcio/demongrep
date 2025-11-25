@@ -1,11 +1,16 @@
 //! Reranking and result fusion strategies
 //!
-//! Provides RRF (Reciprocal Rank Fusion) for combining vector and FTS results.
+//! Provides RRF (Reciprocal Rank Fusion) for combining vector and FTS results,
+//! and neural reranking using cross-encoder models for improved accuracy.
+
+mod neural;
 
 use std::collections::HashMap;
 
 use crate::fts::FtsResult;
 use crate::vectordb::SearchResult;
+
+pub use neural::{NeuralReranker, DEFAULT_RERANK_TOP, RERANK_WEIGHT, RRF_WEIGHT};
 
 /// Default RRF k parameter (per osgrep reference)
 pub const DEFAULT_RRF_K: f32 = 20.0;

@@ -74,6 +74,14 @@ pub enum Commands {
         /// RRF k parameter for score fusion (default 20)
         #[arg(long, default_value = "20")]
         rrf_k: f32,
+
+        /// Enable neural reranking for better accuracy (uses Jina Reranker)
+        #[arg(long)]
+        rerank: bool,
+
+        /// Number of top results to rerank (default 50)
+        #[arg(long, default_value = "50")]
+        rerank_top: usize,
     },
 
     /// Index the repository
@@ -156,6 +164,8 @@ pub async fn run() -> Result<()> {
             path,
             vector_only,
             rrf_k,
+            rerank,
+            rerank_top,
         } => {
             crate::search::search(
                 &query,
@@ -170,6 +180,8 @@ pub async fn run() -> Result<()> {
                 model_type,
                 vector_only,
                 rrf_k,
+                rerank,
+                rerank_top,
             )
             .await
         }

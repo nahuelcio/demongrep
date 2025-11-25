@@ -1,14 +1,14 @@
 use anyhow::{anyhow, Result};
 use colored::Colorize;
 use std::path::PathBuf;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::cache::FileMetaStore;
 use crate::chunker::SemanticChunker;
 use crate::embed::{EmbeddingService, ModelType};
 use crate::file::FileWalker;
 use crate::fts::FtsStore;
-use crate::rerank::{rrf_fusion, vector_only, FusedResult, DEFAULT_RRF_K};
+use crate::rerank::{rrf_fusion, vector_only, FusedResult, NeuralReranker, DEFAULT_RRF_K};
 use crate::vectordb::VectorStore;
 
 /// Get the database path for a given project directory
@@ -47,6 +47,8 @@ pub async fn search(
     model_override: Option<ModelType>,
     vector_only_mode: bool,
     rrf_k: f32,
+    rerank: bool,
+    rerank_top: usize,
 ) -> Result<()> {
     let db_path = get_db_path(path)?;
 
@@ -125,7 +127,10 @@ pub async fn search(
     let chunk_id_to_result: std::collections::HashMap<u32, &crate::vectordb::SearchResult> =
         vector_results.iter().map(|r| (r.id, r)).collect();
 
-    for fused in fused_results.iter().take(max_results) {
+    // Take top rerank_top results for reranking (or max_results if not reranking)
+    let take_count = if rerank { rerank_top.min(fused_results.len()) } else { max_results };
+
+    for fused in fused_results.iter().take(take_count) {
         if let Some(result) = chunk_id_to_result.get(&fused.chunk_id) {
             // Update score to RRF score
             let mut r = (*result).clone();
@@ -141,6 +146,47 @@ pub async fn search(
     }
 
     let search_duration = start.elapsed();
+
+    // Neural reranking (if enabled)
+    let mut rerank_duration = Duration::ZERO;
+    if rerank && !results.is_empty() {
+        let start = Instant::now();
+
+        // Initialize neural reranker (Jina Reranker v1 Turbo)
+        match NeuralReranker::new() {
+            Ok(mut reranker) => {
+                // Prepare documents for reranking
+                let documents: Vec<String> = results.iter().map(|r| r.content.clone()).collect();
+                let rrf_scores: Vec<f32> = results.iter().map(|r| r.score).collect();
+
+                // Rerank and blend scores
+                match reranker.rerank_and_blend(query, &documents, &rrf_scores) {
+                    Ok(reranked) => {
+                        // Reorder results based on reranked indices
+                        let mut reordered: Vec<crate::vectordb::SearchResult> = Vec::with_capacity(results.len());
+                        for (idx, score) in reranked {
+                            let mut result = results[idx].clone();
+                            result.score = score;
+                            reordered.push(result);
+                        }
+                        results = reordered;
+                        println!("{}", "✅ Neural reranking applied".green());
+                    }
+                    Err(e) => {
+                        eprintln!("{}", format!("⚠️  Reranking failed: {}", e).yellow());
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("{}", format!("⚠️  Could not load reranker: {}", e).yellow());
+            }
+        }
+
+        rerank_duration = start.elapsed();
+    }
+
+    // Truncate to max_results after reranking
+    results.truncate(max_results);
 
     // Output results
     if json {
@@ -174,7 +220,10 @@ pub async fn search(
         println!("   Model load:    {:?}", model_load_duration);
         println!("   Query embed:   {:?}", embed_duration);
         println!("   Search:        {:?}", search_duration);
-        println!("   Total:         {:?}", load_duration + model_load_duration + embed_duration + search_duration);
+        if rerank {
+            println!("   Reranking:     {:?}", rerank_duration);
+        }
+        println!("   Total:         {:?}", load_duration + model_load_duration + embed_duration + search_duration + rerank_duration);
         println!();
     }
 
