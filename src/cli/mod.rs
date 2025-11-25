@@ -66,6 +66,14 @@ pub enum Commands {
         /// Path to search in (defaults to current directory)
         #[arg(long)]
         path: Option<PathBuf>,
+
+        /// Use vector-only search (disable hybrid FTS)
+        #[arg(long)]
+        vector_only: bool,
+
+        /// RRF k parameter for score fusion (default 20)
+        #[arg(long, default_value = "20")]
+        rrf_k: f32,
     },
 
     /// Index the repository
@@ -146,6 +154,8 @@ pub async fn run() -> Result<()> {
             sync,
             json,
             path,
+            vector_only,
+            rrf_k,
         } => {
             crate::search::search(
                 &query,
@@ -158,6 +168,8 @@ pub async fn run() -> Result<()> {
                 json,
                 path,
                 model_type,
+                vector_only,
+                rrf_k,
             )
             .await
         }

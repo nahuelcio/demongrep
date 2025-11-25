@@ -385,6 +385,29 @@ impl VectorStore {
         Ok(self.chunks.get(&rtxn, &id)?)
     }
 
+    /// Get a chunk as SearchResult (for hybrid search)
+    pub fn get_chunk_as_result(&self, id: u32) -> Result<Option<SearchResult>> {
+        let rtxn = self.env.read_txn()?;
+        if let Some(meta) = self.chunks.get(&rtxn, &id)? {
+            Ok(Some(SearchResult {
+                id,
+                content: meta.content,
+                path: meta.path,
+                start_line: meta.start_line,
+                end_line: meta.end_line,
+                kind: meta.kind,
+                signature: meta.signature,
+                docstring: meta.docstring,
+                context: meta.context,
+                hash: meta.hash,
+                distance: 0.0,
+                score: 0.0, // Will be set by caller
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Get the database file size in bytes
     pub fn db_size(&self) -> Result<u64> {
         let info = self.env.info();

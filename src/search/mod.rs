@@ -7,6 +7,8 @@ use crate::cache::FileMetaStore;
 use crate::chunker::SemanticChunker;
 use crate::embed::{EmbeddingService, ModelType};
 use crate::file::FileWalker;
+use crate::fts::FtsStore;
+use crate::rerank::{rrf_fusion, vector_only, FusedResult, DEFAULT_RRF_K};
 use crate::vectordb::VectorStore;
 
 /// Get the database path for a given project directory
@@ -43,6 +45,8 @@ pub async fn search(
     json: bool,
     path: Option<PathBuf>,
     model_override: Option<ModelType>,
+    vector_only_mode: bool,
+    rrf_k: f32,
 ) -> Result<()> {
     let db_path = get_db_path(path)?;
 
@@ -91,9 +95,51 @@ pub async fn search(
     let query_embedding = embedding_service.embed_query(query)?;
     let embed_duration = start.elapsed();
 
-    // Search
+    // Search - hybrid by default, vector-only if requested
     let start = Instant::now();
-    let results = store.search(&query_embedding, max_results)?;
+
+    // Fetch more results for RRF fusion (200 per source, per osgrep pattern)
+    let retrieval_limit = if vector_only_mode { max_results } else { 200 };
+    let vector_results = store.search(&query_embedding, retrieval_limit)?;
+
+    let fused_results: Vec<FusedResult> = if vector_only_mode {
+        // Vector-only mode
+        vector_only(&vector_results)
+    } else {
+        // Hybrid search with RRF fusion
+        match FtsStore::open_readonly(&db_path) {
+            Ok(fts_store) => {
+                let fts_results = fts_store.search(query, retrieval_limit)?;
+                rrf_fusion(&vector_results, &fts_results, rrf_k)
+            }
+            Err(_) => {
+                // FTS not available, fall back to vector-only
+                eprintln!("{}", "⚠️  FTS index not found, using vector-only search".yellow());
+                vector_only(&vector_results)
+            }
+        }
+    };
+
+    // Map fused results back to full SearchResult
+    let mut results: Vec<crate::vectordb::SearchResult> = Vec::new();
+    let chunk_id_to_result: std::collections::HashMap<u32, &crate::vectordb::SearchResult> =
+        vector_results.iter().map(|r| (r.id, r)).collect();
+
+    for fused in fused_results.iter().take(max_results) {
+        if let Some(result) = chunk_id_to_result.get(&fused.chunk_id) {
+            // Update score to RRF score
+            let mut r = (*result).clone();
+            r.score = fused.rrf_score;
+            results.push(r);
+        } else {
+            // Result only from FTS, need to fetch from store
+            if let Ok(Some(mut result)) = store.get_chunk_as_result(fused.chunk_id) {
+                result.score = fused.rrf_score;
+                results.push(result);
+            }
+        }
+    }
+
     let search_duration = start.elapsed();
 
     // Output results

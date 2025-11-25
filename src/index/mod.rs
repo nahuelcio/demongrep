@@ -7,6 +7,7 @@ use std::time::Instant;
 use crate::chunker::SemanticChunker;
 use crate::embed::{EmbeddingService, ModelType};
 use crate::file::FileWalker;
+use crate::fts::FtsStore;
 use crate::vectordb::VectorStore;
 
 /// Get the database path for a given project directory
@@ -153,11 +154,30 @@ pub async fn index(path: Option<PathBuf>, dry_run: bool, force: bool, model: Opt
     println!("✅ Database created");
 
     println!("\n🔄 Inserting {} chunks...", embedded_chunks.len());
-    let count = store.insert_chunks(embedded_chunks)?;
-    println!("✅ Inserted {} chunks", count);
+    let chunk_ids = store.insert_chunks_with_ids(embedded_chunks.clone())?;
+    println!("✅ Inserted {} chunks into vector store", chunk_ids.len());
 
     println!("\n🔄 Building vector index...");
     store.build_index()?;
+
+    // Phase 4b: FTS Index
+    println!("\n🔄 Building full-text search index...");
+    let mut fts_store = FtsStore::new(&db_path)?;
+
+    for (chunk, chunk_id) in embedded_chunks.iter().zip(chunk_ids.iter()) {
+        fts_store.add_chunk(
+            *chunk_id,
+            &chunk.chunk.content,
+            &chunk.chunk.path,
+            chunk.chunk.signature.as_deref(),
+            &format!("{:?}", chunk.chunk.kind),
+        )?;
+    }
+    fts_store.commit()?;
+
+    let fts_stats = fts_store.stats()?;
+    println!("✅ FTS index built ({} documents)", fts_stats.num_documents);
+
     let storage_duration = start.elapsed();
 
     println!("✅ Index built in {:?}", storage_duration);

@@ -11,6 +11,7 @@ mod watch;
 mod server;
 mod bench;
 mod file;
+mod fts;
 
 use anyhow::Result;
 use tracing::info;
