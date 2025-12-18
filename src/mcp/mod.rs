@@ -116,7 +116,7 @@ impl DemongrepService {
     }
 
     /// Get or initialize the embedding service
-    fn get_embedding_service(&self) -> Result<std::sync::MutexGuard<Option<EmbeddingService>>> {
+    fn get_embedding_service(&self) -> Result<std::sync::MutexGuard<'_, Option<EmbeddingService>>> {
         let mut guard = self.embedding_service.lock().unwrap();
         if guard.is_none() {
             *guard = Some(EmbeddingService::with_model(self.model_type)?);

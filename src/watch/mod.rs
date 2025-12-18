@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, FileIdMap};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};

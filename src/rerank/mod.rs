@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use crate::fts::FtsResult;
 use crate::vectordb::SearchResult;
 
-pub use neural::{NeuralReranker, DEFAULT_RERANK_TOP, RERANK_WEIGHT, RRF_WEIGHT};
+pub use neural::NeuralReranker;
 
 /// Default RRF k parameter (per osgrep reference)
 pub const DEFAULT_RRF_K: f32 = 20.0;

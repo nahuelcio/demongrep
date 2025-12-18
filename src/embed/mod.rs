@@ -3,8 +3,8 @@ mod batch;
 mod cache;
 
 pub use embedder::{FastEmbedder, ModelType};
-pub use batch::{BatchEmbedder, EmbeddedChunk, EmbeddingStats, cosine_similarity};
-pub use cache::{CachedBatchEmbedder, EmbeddingCache, CacheStats};
+pub use batch::{BatchEmbedder, EmbeddedChunk};
+pub use cache::{CachedBatchEmbedder, CacheStats};
 
 use anyhow::Result;
 use std::sync::{Arc, Mutex};
