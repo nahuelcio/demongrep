@@ -137,6 +137,10 @@ pub enum Commands {
         /// Skip confirmation prompt
         #[arg(short = 'y', long)]
         yes: bool,
+
+        /// Project name or path to clear (looks up in global projects.json)
+        #[arg(short = 'p', long)]
+        project: Option<String>,
     },
 
     /// Check installation health
@@ -223,7 +227,7 @@ pub async fn run() -> Result<()> {
         Commands::Serve { port, path } => crate::server::serve(port, path).await,
         Commands::List => crate::index::list().await,
         Commands::Stats { path } => crate::index::stats(path).await,
-        Commands::Clear { path, yes } => crate::index::clear(path, yes).await,
+        Commands::Clear { path, yes, project } => crate::index::clear(path, yes, project).await,
         Commands::Doctor => crate::cli::doctor::run().await,
         Commands::Setup { model } => crate::cli::setup::run(model).await,
         Commands::Mcp { path } => crate::mcp::run_mcp_server(path).await,

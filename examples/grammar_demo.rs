@@ -13,7 +13,7 @@ fn main() {
     // Show supported languages
     println!("\n✅ Supported languages:");
     for lang in manager.supported_languages() {
-        println!("   - {}", lang.name());
+        println!("   - {:?}", lang);
     }
 
     // Show stats before loading
@@ -77,7 +77,7 @@ struct Point {
     match parser.parse(Language::Rust, rust_code) {
         Ok(parsed) => {
             println!("   ✅ Parse successful!");
-            println!("   Has errors: {}", parsed.has_errors());
+            println!("   Has errors: {:?}", parsed.has_errors());
             println!("   Root node kind: {}", parsed.root_node().kind());
 
             // Find functions
@@ -104,7 +104,7 @@ class Calculator:
     match parser.parse(Language::Python, python_code) {
         Ok(parsed) => {
             println!("   ✅ Parse successful!");
-            println!("   Has errors: {}", parsed.has_errors());
+            println!("   Has errors: {:?}", parsed.has_errors());
             println!("   Root node kind: {}", parsed.root_node().kind());
 
             // Find functions

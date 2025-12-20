@@ -1,3 +1,6 @@
+// Allow dead code - public APIs for future use
+#![allow(dead_code)]
+
 mod cli;
 mod config;
 mod chunker;
@@ -14,6 +17,7 @@ mod file;
 mod fts;
 mod mcp;
 mod output;
+mod database;  // NEW: Centralized database management
 
 use anyhow::Result;
 use tracing::info;

@@ -385,7 +385,7 @@ mod tests {
     #[test]
     #[ignore] // Requires model
     fn test_embed_single_text() {
-        let embedder = FastEmbedder::new().unwrap();
+        let mut embedder = FastEmbedder::new().unwrap();
         let embedding = embedder.embed_one("Hello, world!").unwrap();
 
         assert_eq!(embedding.len(), 384);
@@ -397,7 +397,7 @@ mod tests {
     #[test]
     #[ignore] // Requires model
     fn test_embed_batch() {
-        let embedder = FastEmbedder::new().unwrap();
+        let mut embedder = FastEmbedder::new().unwrap();
         let texts = vec![
             "Hello, world!".to_string(),
             "Rust is awesome".to_string(),
@@ -415,7 +415,7 @@ mod tests {
     #[test]
     #[ignore] // Requires model
     fn test_semantic_similarity() {
-        let embedder = FastEmbedder::new().unwrap();
+        let mut embedder = FastEmbedder::new().unwrap();
 
         let text1 = "The quick brown fox jumps over the lazy dog";
         let text2 = "A fast auburn fox leaps over a sleepy canine";

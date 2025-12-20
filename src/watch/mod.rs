@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, FileIdMap};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -95,6 +95,14 @@ impl FileWatcher {
     fn should_ignore(&self, path: &Path) -> bool {
         let path_str = path.to_string_lossy();
 
+        // Special case: allow .gitignore files even if they match other patterns
+        if let Some(name) = path.file_name() {
+            let name_str = name.to_string_lossy();
+            if name_str == ".gitignore" {
+                return false;
+            }
+        }
+
         for pattern in &self.ignore_patterns {
             if pattern.starts_with('*') {
                 // Extension pattern like "*.lock"
@@ -110,10 +118,10 @@ impl FileWatcher {
             }
         }
 
-        // Ignore hidden files (except .gitignore, etc)
+        // Ignore hidden files (except .gitignore which was handled above)
         if let Some(name) = path.file_name() {
             let name_str = name.to_string_lossy();
-            if name_str.starts_with('.') && name_str != ".gitignore" {
+            if name_str.starts_with('.') {
                 return true;
             }
         }

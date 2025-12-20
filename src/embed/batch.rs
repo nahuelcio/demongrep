@@ -5,15 +5,18 @@ use std::sync::{Arc, Mutex};
 
 /// Statistics for embedding operations
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 pub struct EmbeddingStats {
     pub total_chunks: usize,
     pub embedded_chunks: usize,
     pub cached_chunks: usize,
+    #[allow(dead_code)]
     pub failed_chunks: usize,
     pub total_time_ms: u128,
 }
 
 impl EmbeddingStats {
+    #[allow(dead_code)]
     pub fn cache_hit_rate(&self) -> f32 {
         if self.total_chunks == 0 {
             return 0.0;
@@ -21,6 +24,7 @@ impl EmbeddingStats {
         self.cached_chunks as f32 / self.total_chunks as f32
     }
 
+    #[allow(dead_code)]
     pub fn success_rate(&self) -> f32 {
         if self.total_chunks == 0 {
             return 0.0;
@@ -28,6 +32,7 @@ impl EmbeddingStats {
         self.embedded_chunks as f32 / self.total_chunks as f32
     }
 
+    #[allow(dead_code)]
     pub fn chunks_per_second(&self) -> f32 {
         if self.total_time_ms == 0 {
             return 0.0;
@@ -190,7 +195,19 @@ impl BatchEmbedder {
 
 /// Clean docstring by removing comment markers
 fn clean_docstring(doc: &str) -> String {
-    doc.lines()
+    // First handle triple-quoted strings and JSDoc as special cases
+    let cleaned = if let Some(stripped) = doc.strip_prefix("\"\"\"").and_then(|s| s.strip_suffix("\"\"\"")) {
+        stripped
+    } else if let Some(stripped) = doc.strip_prefix("'''").and_then(|s| s.strip_suffix("'''")) {
+        stripped
+    } else if let Some(stripped) = doc.strip_prefix("/**").and_then(|s| s.strip_suffix("*/")) {
+        stripped
+    } else {
+        doc
+    };
+
+    cleaned
+        .lines()
         .map(|line| {
             let trimmed = line.trim();
             // Remove common comment markers
@@ -259,10 +276,10 @@ mod tests {
 
     #[test]
     fn test_prepare_text() {
-        let embedder = Arc::new(FastEmbedder::new().unwrap_or_else(|_| {
+        let embedder = Arc::new(Mutex::new(FastEmbedder::new().unwrap_or_else(|_| {
             // For tests, create a mock if real embedder fails
             panic!("Cannot create embedder in test");
-        }));
+        })));
 
         let batch = BatchEmbedder::new(embedder);
 
@@ -304,8 +321,8 @@ mod tests {
     #[test]
     #[ignore] // Requires model
     fn test_batch_embedder() {
-        let embedder = Arc::new(FastEmbedder::new().unwrap());
-        let batch = BatchEmbedder::new(embedder);
+        let embedder = Arc::new(Mutex::new(FastEmbedder::new().unwrap()));
+        let mut batch = BatchEmbedder::new(embedder);
 
         let chunks = vec![
             Chunk::new(

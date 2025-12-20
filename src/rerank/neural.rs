@@ -7,6 +7,7 @@ use crate::info_print;
 use anyhow::Result;
 use fastembed::{RerankInitOptions, RerankerModel, TextRerank};
 
+#[allow(dead_code)]
 /// Default number of top results to rerank
 pub const DEFAULT_RERANK_TOP: usize = 50;
 

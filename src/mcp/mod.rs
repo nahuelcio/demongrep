@@ -17,16 +17,14 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use crate::embed::{EmbeddingService, ModelType};
-use crate::index::get_search_db_paths;
-use crate::vectordb::VectorStore;
+use crate::database::DatabaseManager;  // NEW: Use DatabaseManager
+use crate::embed::EmbeddingService;
 
-/// Demongrep MCP service with dual-database support
+
+/// Demongrep MCP service with dual-database support via DatabaseManager
 pub struct DemongrepService {
     tool_router: ToolRouter<DemongrepService>,
-    db_paths: Vec<PathBuf>,  // Changed: now supports multiple databases
-    model_type: ModelType,
-    dimensions: usize,
+    db_manager: DatabaseManager,  // NEW: Replaced db_paths with DatabaseManager
     // Lazily initialized on first search
     embedding_service: Mutex<Option<EmbeddingService>>,
 }
@@ -34,9 +32,7 @@ pub struct DemongrepService {
 impl std::fmt::Debug for DemongrepService {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DemongrepService")
-            .field("db_paths", &self.db_paths)
-            .field("model_type", &self.model_type)
-            .field("dimensions", &self.dimensions)
+            .field("db_manager", &"<DatabaseManager>")
             .finish()
     }
 }
@@ -73,7 +69,7 @@ pub struct SearchResultItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_next: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub database: Option<String>,  // NEW: which database the result came from
+    pub database: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -81,99 +77,36 @@ pub struct IndexStatusResponse {
     pub indexed: bool,
     pub total_chunks: usize,
     pub total_files: usize,
-    pub local_chunks: usize,  // NEW
-    pub local_files: usize,   // NEW
-    pub global_chunks: usize, // NEW
-    pub global_files: usize,  // NEW
+    pub local_chunks: usize,
+    pub local_files: usize,
+    pub global_chunks: usize,
+    pub global_files: usize,
     pub model: String,
     pub dimensions: usize,
-    pub databases: Vec<String>,  // NEW: list of database paths
-    pub databases_available: usize,  // NEW
+    pub databases: Vec<String>,
+    pub databases_available: usize,
 }
 
 // === Tool Router Implementation ===
 
 #[tool_router]
 impl DemongrepService {
-    /// Create a new DemongrepService with dual-database support
-    pub fn new(db_paths: Vec<PathBuf>) -> Result<Self> {
-        if db_paths.is_empty() {
-            return Err(anyhow::anyhow!("No databases available"));
-        }
-
-        // Read model metadata from first available database
-        let (model_type, dimensions) = Self::read_metadata(&db_paths[0])
-            .unwrap_or_else(|| (ModelType::default(), 384));
-
+    /// Create a new DemongrepService with DatabaseManager
+    pub fn new(db_manager: DatabaseManager) -> Result<Self> {
         Ok(Self {
             tool_router: Self::tool_router(),
-            db_paths,
-            model_type,
-            dimensions,
+            db_manager,
             embedding_service: Mutex::new(None),
         })
     }
 
-    /// Read metadata from a database
-    fn read_metadata(db_path: &PathBuf) -> Option<(ModelType, usize)> {
-        let metadata_path = db_path.join("metadata.json");
-        if metadata_path.exists() {
-            let content = std::fs::read_to_string(&metadata_path).ok()?;
-            let json: serde_json::Value = serde_json::from_str(&content).ok()?;
-            let model_name = json
-                .get("model_short_name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("minilm-l6");
-            let dims = json
-                .get("dimensions")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(384) as usize;
-            let mt = ModelType::from_str(model_name).unwrap_or_default();
-            Some((mt, dims))
-        } else {
-            None
-        }
-    }
-
     /// Get or initialize the embedding service
-    fn get_embedding_service(&self) -> Result<std::sync::MutexGuard<Option<EmbeddingService>>> {
+    fn get_embedding_service(&self) -> Result<std::sync::MutexGuard<'_, Option<EmbeddingService>>> {
         let mut guard = self.embedding_service.lock().unwrap();
         if guard.is_none() {
-            *guard = Some(EmbeddingService::with_model(self.model_type)?);
+            *guard = Some(EmbeddingService::with_model(self.db_manager.model_type())?);
         }
         Ok(guard)
-    }
-
-    /// Search across all available databases
-    fn search_all_databases(
-        &self,
-        query_embedding: &[f32],
-        limit: usize,
-    ) -> Result<Vec<crate::vectordb::SearchResult>> {
-        let mut all_results = Vec::new();
-
-        for db_path in &self.db_paths {
-            if !db_path.exists() {
-                continue;
-            }
-
-            match VectorStore::new(db_path, self.dimensions) {
-                Ok(store) => {
-                    if let Ok(mut results) = store.search(query_embedding, limit) {
-                        all_results.append(&mut results);
-                    }
-                }
-                Err(e) => {
-                    eprintln!("Warning: Failed to open database {}: {}", db_path.display(), e);
-                }
-            }
-        }
-
-        // Sort by score and limit
-        all_results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
-        all_results.truncate(limit);
-
-        Ok(all_results)
     }
 
     #[tool(description = "Search the codebase using semantic similarity. Searches both local and global databases. Returns code chunks that are semantically similar to the query.")]
@@ -182,15 +115,6 @@ impl DemongrepService {
         Parameters(request): Parameters<SemanticSearchRequest>,
     ) -> Result<CallToolResult, McpError> {
         let limit = request.limit.unwrap_or(10);
-
-        // Check if any database exists
-        let available_dbs: Vec<&PathBuf> = self.db_paths.iter().filter(|p| p.exists()).collect();
-        
-        if available_dbs.is_empty() {
-            return Ok(CallToolResult::success(vec![Content::text(
-                "Error: No index found. Run 'demongrep index' or 'demongrep index --global' first to index the codebase.",
-            )]));
-        }
 
         // Get embedding service and embed query
         let mut service_guard = match self.get_embedding_service() {
@@ -214,8 +138,8 @@ impl DemongrepService {
             }
         };
 
-        // Search across all databases
-        let results = match self.search_all_databases(&query_embedding, limit) {
+        // Search across all databases using DatabaseManager
+        let results = match self.db_manager.search_all(&query_embedding, limit) {
             Ok(r) => r,
             Err(e) => {
                 return Ok(CallToolResult::success(vec![Content::text(format!(
@@ -235,12 +159,14 @@ impl DemongrepService {
         let items: Vec<SearchResultItem> = results
             .into_iter()
             .map(|r| {
-                // Determine which database this came from
-                let database = if r.path.contains(".demongrep.db") {
-                    Some("local".to_string())
-                } else {
-                    Some("global".to_string())
-                };
+                // Determine which database this came from based on path
+                let database = self.db_manager.databases()
+                    .iter()
+                    .find(|db| r.path.starts_with(db.path.to_str().unwrap_or("")))
+                    .map(|db| match db.db_type {
+                        crate::database::DatabaseType::Local => "local".to_string(),
+                        crate::database::DatabaseType::Global => "global".to_string(),
+                    });
 
                 SearchResultItem {
                     path: r.path,
@@ -269,16 +195,9 @@ impl DemongrepService {
         let mut all_file_chunks: Vec<SearchResultItem> = Vec::new();
 
         // Search across all databases
-        for db_path in &self.db_paths {
-            if !db_path.exists() {
-                continue;
-            }
-
-            let store = match VectorStore::new(db_path, self.dimensions) {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-
+        for database in self.db_manager.databases() {
+            let store = database.store();
+            
             let stats = match store.stats() {
                 Ok(s) => s,
                 Err(_) => continue,
@@ -292,10 +211,9 @@ impl DemongrepService {
                     let req_path = request.path.trim_start_matches("./");
 
                     if chunk_path == req_path || chunk.path == request.path {
-                        let database = if db_path.ends_with(".demongrep.db") {
-                            Some("local".to_string())
-                        } else {
-                            Some("global".to_string())
+                        let db_type = match database.db_type {
+                            crate::database::DatabaseType::Local => "local",
+                            crate::database::DatabaseType::Global => "global",
                         };
 
                         all_file_chunks.push(SearchResultItem {
@@ -308,7 +226,7 @@ impl DemongrepService {
                             signature: chunk.signature,
                             context_prev: chunk.context_prev,
                             context_next: chunk.context_next,
-                            database,
+                            database: Some(db_type.to_string()),
                         });
                     }
                 }
@@ -332,53 +250,29 @@ impl DemongrepService {
 
     #[tool(description = "Get the status of the semantic search index including model info and statistics from all databases.")]
     async fn index_status(&self) -> Result<CallToolResult, McpError> {
-        let mut total_chunks = 0;
-        let mut total_files = 0;
-        let mut local_chunks = 0;
-        let mut local_files = 0;
-        let mut global_chunks = 0;
-        let mut global_files = 0;
-        let mut indexed = false;
-        let mut db_paths_str = Vec::new();
-
-        // Collect stats from all databases
-        for db_path in &self.db_paths {
-            if !db_path.exists() {
-                continue;
+        // Use DatabaseManager for stats - MUCH SIMPLER!
+        let stats = match self.db_manager.combined_stats() {
+            Ok(s) => s,
+            Err(e) => {
+                return Ok(CallToolResult::success(vec![Content::text(format!(
+                    "Error getting stats: {}",
+                    e
+                ))]));
             }
-
-            db_paths_str.push(db_path.display().to_string());
-
-            if let Ok(store) = VectorStore::new(db_path, self.dimensions) {
-                if let Ok(stats) = store.stats() {
-                    total_chunks += stats.total_chunks;
-                    total_files += stats.total_files;
-                    indexed = indexed || stats.indexed;
-
-                    // Categorize by database type
-                    if db_path.ends_with(".demongrep.db") {
-                        local_chunks += stats.total_chunks;
-                        local_files += stats.total_files;
-                    } else {
-                        global_chunks += stats.total_chunks;
-                        global_files += stats.total_files;
-                    }
-                }
-            }
-        }
+        };
 
         let response = IndexStatusResponse {
-            indexed,
-            total_chunks,
-            total_files,
-            local_chunks,
-            local_files,
-            global_chunks,
-            global_files,
-            model: self.model_type.short_name().to_string(),
-            dimensions: self.dimensions,
-            databases: db_paths_str.clone(),
-            databases_available: db_paths_str.len(),
+            indexed: stats.indexed,
+            total_chunks: stats.total_chunks,
+            total_files: stats.total_files,
+            local_chunks: stats.local_chunks,
+            local_files: stats.local_files,
+            global_chunks: stats.global_chunks,
+            global_files: stats.global_files,
+            model: self.db_manager.model_type().short_name().to_string(),
+            dimensions: stats.dimensions,
+            databases: self.db_manager.database_paths().iter().map(|p| p.display().to_string()).collect(),
+            databases_available: self.db_manager.database_count(),
         };
 
         let json = serde_json::to_string_pretty(&response).unwrap_or_else(|_| "{}".to_string());
@@ -412,31 +306,33 @@ impl ServerHandler for DemongrepService {
     }
 }
 
-/// Run the MCP server using stdio transport with dual-database support
+/// Run the MCP server using stdio transport with DatabaseManager
 pub async fn run_mcp_server(path: Option<PathBuf>) -> Result<()> {
     use rmcp::{transport::stdio, ServiceExt};
 
-    // Use get_search_db_paths to find all available databases
-    let db_paths = get_search_db_paths(path)?;
-
-    if db_paths.is_empty() {
-        eprintln!("Error: No databases found!");
-        eprintln!("Run 'demongrep index' or 'demongrep index --global' first.");
-        return Err(anyhow::anyhow!("No databases found"));
-    }
+    // Use DatabaseManager to load all databases
+    let db_manager = match DatabaseManager::load(path) {
+        Ok(manager) => manager,
+        Err(_) => {
+            eprintln!("Error: No databases found!");
+            eprintln!("Run 'demongrep index' or 'demongrep index --global' first.");
+            return Err(anyhow::anyhow!("No databases found"));
+        }
+    };
 
     eprintln!("Starting demongrep MCP server...");
-    eprintln!("Databases found:");
-    for db_path in &db_paths {
-        let db_type = if db_path.ends_with(".demongrep.db") {
-            "Local"
-        } else {
-            "Global"
-        };
-        eprintln!("  {} {}", db_type, db_path.display());
+    eprintln!("Databases loaded:");
+    for database in db_manager.databases() {
+        eprintln!("  {} {}", 
+            match database.db_type {
+                crate::database::DatabaseType::Local => "📍 Local: ",
+                crate::database::DatabaseType::Global => "🌍 Global:",
+            },
+            database.path.display()
+        );
     }
 
-    let service = DemongrepService::new(db_paths)?;
+    let service = DemongrepService::new(db_manager)?;
 
     // Serve using stdio transport
     let server = service.serve(stdio()).await?;

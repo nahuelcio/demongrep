@@ -3,8 +3,8 @@ mod batch;
 mod cache;
 
 pub use embedder::{FastEmbedder, ModelType};
-pub use batch::{BatchEmbedder, EmbeddedChunk, EmbeddingStats, cosine_similarity};
-pub use cache::{CachedBatchEmbedder, EmbeddingCache, CacheStats};
+pub use batch::{BatchEmbedder, EmbeddedChunk};
+pub use cache::{CachedBatchEmbedder, CacheStats};
 
 use anyhow::Result;
 use std::sync::{Arc, Mutex};
@@ -134,7 +134,7 @@ mod tests {
     #[test]
     #[ignore] // Requires model
     fn test_embed_query() {
-        let service = EmbeddingService::new().unwrap();
+        let mut service = EmbeddingService::new().unwrap();
         let query_embedding = service.embed_query("find authentication code").unwrap();
 
         assert_eq!(query_embedding.len(), 384);
@@ -143,7 +143,7 @@ mod tests {
     #[test]
     #[ignore] // Requires model
     fn test_embed_chunks_with_cache() {
-        let service = EmbeddingService::new().unwrap();
+        let mut service = EmbeddingService::new().unwrap();
 
         let chunks = vec![
             Chunk::new(
@@ -180,7 +180,7 @@ mod tests {
     #[test]
     #[ignore] // Requires model
     fn test_search() {
-        let service = EmbeddingService::new().unwrap();
+        let mut service = EmbeddingService::new().unwrap();
 
         let chunks = vec![
             Chunk::new(

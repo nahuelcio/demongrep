@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use crate::fts::FtsResult;
 use crate::vectordb::SearchResult;
 
-pub use neural::{NeuralReranker, DEFAULT_RERANK_TOP, RERANK_WEIGHT, RRF_WEIGHT};
+pub use neural::NeuralReranker;
 
 /// Default RRF k parameter (per osgrep reference)
 pub const DEFAULT_RRF_K: f32 = 20.0;
@@ -114,14 +114,19 @@ mod tests {
     fn make_vector_result(id: u32, score: f32) -> SearchResult {
         SearchResult {
             id,
-            score,
-            path: format!("file_{}.rs", id),
             content: format!("content {}", id),
+            path: format!("file_{}.rs", id),
             start_line: 1,
             end_line: 10,
             kind: "function".to_string(),
             signature: None,
+            docstring: None,
             context: None,
+            hash: format!("hash_{}", id),
+            distance: 1.0 - score,
+            score,
+            context_prev: None,
+            context_next: None,
         }
     }
 

@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crate::chunker::SemanticChunker;
+use crate::database::DatabaseManager;
 use crate::embed::{EmbeddingService, ModelType};
 use crate::file::FileWalker;
 use crate::fts::FtsStore;
@@ -89,6 +90,79 @@ fn save_project_mapping(project_path: &Path, db_path: &Path) -> Result<()> {
         project_path.to_string_lossy().to_string(),
         db_path.to_string_lossy().to_string()
     );
+    
+    // Write back
+    std::fs::write(&mapping_file, serde_json::to_string_pretty(&mappings)?)?;
+    
+    Ok(())
+}
+
+/// Find databases for a project by name (searches in projects.json)
+fn find_project_databases(project_name: &str) -> Result<Vec<PathBuf>> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
+    let mapping_file = home.join(".demongrep").join("projects.json");
+    
+    if !mapping_file.exists() {
+        return Ok(Vec::new());
+    }
+    
+    let content = std::fs::read_to_string(&mapping_file)?;
+    let mappings: std::collections::HashMap<String, String> = serde_json::from_str(&content)?;
+    
+    let mut found_paths = Vec::new();
+    
+    // Search for matching project (by name or full path)
+    for (project_path, db_path_str) in mappings {
+        // Match by full path or by directory name
+        let matches = project_path.contains(project_name) || 
+                     PathBuf::from(&project_path)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|n| n.contains(project_name))
+                        .unwrap_or(false);
+        
+        if matches {
+            let db_path = PathBuf::from(&db_path_str);
+            if db_path.exists() {
+                found_paths.push(db_path);
+            }
+            
+            // Also check for local database at project path
+            let project_pb = PathBuf::from(&project_path);
+            if project_pb.exists() {
+                let local_db = project_pb.join(".demongrep.db");
+                if local_db.exists() {
+                    found_paths.push(local_db);
+                }
+            }
+        }
+    }
+    
+    Ok(found_paths)
+}
+
+/// Remove a project from the projects.json mapping
+fn remove_from_project_mapping(project_name: &str) -> Result<()> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
+    let mapping_file = home.join(".demongrep").join("projects.json");
+    
+    if !mapping_file.exists() {
+        return Ok(());
+    }
+    
+    let content = std::fs::read_to_string(&mapping_file)?;
+    let mut mappings: std::collections::HashMap<String, String> = serde_json::from_str(&content)?;
+    
+    // Remove matching projects
+    mappings.retain(|project_path, _| {
+        let matches = project_path.contains(project_name) || 
+                     PathBuf::from(project_path)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|n| n.contains(project_name))
+                        .unwrap_or(false);
+        !matches  // Keep if NOT matching
+    });
     
     // Write back
     std::fs::write(&mapping_file, serde_json::to_string_pretty(&mappings)?)?;
@@ -356,56 +430,82 @@ pub async fn list() -> Result<()> {
     Ok(())
 }
 
-/// Show statistics about the vector database
+/// Show statistics about the vector database - REFACTORED to use DatabaseManager
 pub async fn stats(path: Option<PathBuf>) -> Result<()> {
-    let db_paths = get_search_db_paths(path)?;
-    
-    if db_paths.is_empty() {
-        println!("{}", "❌ No database found!".red());
-        println!("   Run {} or {} first", 
-            "demongrep index".bright_cyan(),
-            "demongrep index --global".bright_cyan()
-        );
-        return Ok(());
+    // Load all databases using DatabaseManager
+    let db_manager = match DatabaseManager::load(path) {
+        Ok(manager) => manager,
+        Err(_) => {
+            println!("{}", "❌ No database found!".red());
+            println!("   Run {} or {} first", 
+                "demongrep index".bright_cyan(),
+                "demongrep index --global".bright_cyan()
+            );
+            return Ok(());
+        }
+    };
+
+    // Show database info
+    db_manager.print_info();
+    println!();
+
+    // Get combined statistics
+    let combined = db_manager.combined_stats()?;
+
+    // Print combined statistics
+    println!("{}", "📊 Combined Statistics".bright_cyan().bold());
+    println!("{}", "=".repeat(60));
+    println!("\n{}", "Overall:".bright_green());
+    println!("   Total chunks: {}", combined.total_chunks);
+    println!("   Total files: {}", combined.total_files);
+    println!("   Indexed: {}", if combined.indexed { "✅ Yes" } else { "❌ No" });
+    println!("   Dimensions: {}", combined.dimensions);
+
+    // Show breakdown if both databases exist
+    if db_manager.database_count() > 1 {
+        println!("\n{}", "Breakdown:".bright_green());
+        if combined.local_chunks > 0 {
+            println!("   📍 Local:  {} chunks from {} files", combined.local_chunks, combined.local_files);
+        }
+        if combined.global_chunks > 0 {
+            println!("   🌍 Global: {} chunks from {} files", combined.global_chunks, combined.global_files);
+        }
     }
-    
-    for db_path in db_paths {
-        let db_type = if db_path.ends_with(".demongrep.db") { "Local" } else { "Global" };
-        println!("{}", format!("📊 {} Database Statistics", db_type).bright_cyan().bold());
-        println!("{}", "=".repeat(60));
-        println!("💾 Database: {}", db_path.display());
 
-        let store = VectorStore::new(&db_path, 384)?; // We'll need to store dimensions in metadata
-        let stats = store.stats()?;
-
-        println!("\n{}", "Vector Store:".bright_green());
-        println!("   Total chunks: {}", stats.total_chunks);
-        println!("   Total files: {}", stats.total_files);
-        println!("   Indexed: {}", if stats.indexed { "✅ Yes" } else { "❌ No" });
-        println!("   Dimensions: {}", stats.dimensions);
-
-        // Calculate database size
-        let mut total_size = 0u64;
-        for entry in std::fs::read_dir(&db_path)? {
+    // Calculate total database size
+    let mut total_size = 0u64;
+    for db_path in db_manager.database_paths() {
+        for entry in std::fs::read_dir(db_path)? {
             let entry = entry?;
             total_size += entry.metadata()?.len();
         }
+    }
 
-        println!("\n{}", "Storage:".bright_green());
-        println!("   Database size: {:.2} MB", total_size as f64 / (1024.0 * 1024.0));
-        println!("   Avg per chunk: {:.2} KB", (total_size as f64 / stats.total_chunks as f64) / 1024.0);
-        println!();
+    println!("\n{}", "Storage:".bright_green());
+    println!("   Total database size: {:.2} MB", total_size as f64 / (1024.0 * 1024.0));
+    if combined.total_chunks > 0 {
+        println!("   Average per chunk: {:.2} KB", (total_size as f64 / combined.total_chunks as f64) / 1024.0);
     }
 
     Ok(())
 }
 
 /// Clear the vector database
-pub async fn clear(path: Option<PathBuf>, yes: bool) -> Result<()> {
-    let db_paths = get_search_db_paths(path)?;
+pub async fn clear(path: Option<PathBuf>, yes: bool, project: Option<String>) -> Result<()> {
+    let db_paths = if let Some(project_name) = &project {
+        // Look up project in projects.json
+        find_project_databases(project_name)?
+    } else {
+        // Use current directory
+        get_search_db_paths(path)?
+    };
     
     if db_paths.is_empty() {
         println!("{}", "❌ No database found!".red());
+        if let Some(proj) = &project {
+            println!("   Project '{}' not found in global registry", proj);
+            println!("   Run {} to see all indexed projects", "demongrep list".bright_cyan());
+        }
         return Ok(());
     }
 
@@ -439,13 +539,17 @@ pub async fn clear(path: Option<PathBuf>, yes: bool) -> Result<()> {
         println!("{}", format!("✅ {} database cleared!", db_type).green());
     }
 
+    // If we cleared by project name, remove from projects.json
+    if let Some(project_name) = project {
+        remove_from_project_mapping(&project_name)?;
+        println!("\n✅ Removed '{}' from global registry", project_name);
+    }
+
     Ok(())
 }
 
 /// Helper to print repository stats
-fn print_repo_stats(repo_path: &Path, db_path: &Path) -> Result<()> {
-    println!("   📂 {}", repo_path.display());
-
+fn print_repo_stats(_repo_path: &Path, db_path: &Path) -> Result<()> {
     // Try to load stats
     match VectorStore::new(db_path, 384) {
         Ok(store) => {

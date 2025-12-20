@@ -21,6 +21,7 @@ use crate::index::get_search_db_paths;
 use crate::vectordb::VectorStore;
 use crate::watch::{FileEvent, FileWatcher};
 
+#[allow(dead_code)]
 /// Database entry with its metadata
 struct DatabaseEntry {
     store: VectorStore,
@@ -29,12 +30,14 @@ struct DatabaseEntry {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(dead_code)]
 enum DatabaseType {
     Local,
     Global,
 }
 
 impl DatabaseType {
+    #[allow(dead_code)]
     fn name(&self) -> &str {
         match self {
             DatabaseType::Local => "Local",
@@ -51,6 +54,7 @@ struct ServerState {
     
     /// Global database - read-only for searching
     global_store: Option<RwLock<VectorStore>>,
+    #[allow(dead_code)]
     global_db_path: Option<PathBuf>,
     
     /// Shared services
