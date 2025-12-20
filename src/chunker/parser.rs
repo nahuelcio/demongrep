@@ -66,7 +66,7 @@ pub struct ParsedCode {
 
 impl ParsedCode {
     /// Get the root node of the parse tree
-    pub fn root_node(&self) -> Node {
+    pub fn root_node(&self) -> Node<'_> {
         self.tree.root_node()
     }
 

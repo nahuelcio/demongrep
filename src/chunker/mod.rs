@@ -10,10 +10,6 @@ mod dedup;
 mod extractor;
 mod semantic;
 
-pub use grammar::{GrammarManager, GrammarStats};
-pub use parser::{CodeParser, ParsedCode};
-pub use tree_sitter::TreeSitterChunker;
-pub use dedup::ChunkDeduplicator;
 pub use semantic::SemanticChunker;
 
 /// Default number of context lines before/after a chunk

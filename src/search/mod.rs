@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use colored::Colorize;
 use serde::Serialize;
 use std::path::PathBuf;
@@ -9,7 +9,6 @@ use crate::chunker::SemanticChunker;
 use crate::embed::{EmbeddingService, ModelType};
 use crate::file::FileWalker;
 use crate::fts::FtsStore;
-use crate::index::get_search_db_paths;
 use crate::rerank::{rrf_fusion, vector_only, FusedResult, NeuralReranker, DEFAULT_RRF_K};
 use crate::vectordb::VectorStore;
 

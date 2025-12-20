@@ -75,10 +75,14 @@ impl Language {
                 | Self::Python
                 | Self::JavaScript
                 | Self::TypeScript
+                | Self::CSharp
                 | Self::Go
                 | Self::Java
                 | Self::C
                 | Self::Cpp
+                | Self::Ruby
+                | Self::Php
+                | Self::Shell
         )
     }
 
