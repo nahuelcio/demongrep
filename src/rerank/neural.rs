@@ -91,7 +91,13 @@ impl NeuralReranker {
             return Ok(vec![]);
         }
 
-        assert_eq!(documents.len(), rrf_scores.len(), "Documents and RRF scores must have same length");
+        if documents.len() != rrf_scores.len() {
+            return Err(anyhow::anyhow!(
+                "Documents and RRF scores length mismatch: {} vs {}",
+                documents.len(),
+                rrf_scores.len()
+            ));
+        }
 
         // Get rerank scores
         let rerank_results = self.rerank(query, documents)?;

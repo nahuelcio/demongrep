@@ -46,9 +46,10 @@ impl EmbeddingService {
 
     /// Embed query text
     pub fn embed_query(&mut self, query: &str) -> Result<Vec<f32>> {
-        // Access the batch embedder's embedder via mutex
         let embedder_arc = &self.cached_embedder.batch_embedder.embedder;
-        embedder_arc.lock().unwrap().embed_one(query)
+        let mut guard = embedder_arc.lock()
+            .map_err(|e| anyhow::anyhow!("Embedding mutex poisoned: {}", e))?;
+        guard.embed_one(query)
     }
 
     /// Get embedding dimensions
@@ -104,11 +105,8 @@ impl EmbeddingService {
     }
 }
 
-impl Default for EmbeddingService {
-    fn default() -> Self {
-        Self::new().expect("Failed to create default embedding service")
-    }
-}
+// NOTE: Default impl removed - EmbeddingService::new() returns Result and must not
+// panic on model load failure. Use EmbeddingService::new() or ::with_model() instead.
 
 #[cfg(test)]
 mod tests {

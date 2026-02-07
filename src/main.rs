@@ -5,6 +5,7 @@ mod cli;
 mod config;
 mod chunker;
 mod embed;
+mod error;
 mod rerank;
 mod vectordb;
 mod cache;
@@ -17,7 +18,7 @@ mod file;
 mod fts;
 mod mcp;
 mod output;
-mod database;  // NEW: Centralized database management
+mod database;
 
 use anyhow::Result;
 use tracing::info;

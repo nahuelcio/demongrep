@@ -10,9 +10,9 @@ use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 use crate::cache::FileMetaStore;
 use crate::chunker::SemanticChunker;
@@ -590,7 +590,7 @@ async fn handle_file_modified(state: &ServerState, path: &PathBuf) -> Result<()>
     let language = crate::file::Language::from_path(path);
 
     let chunks = {
-        let mut chunker = state.chunker.lock().unwrap();
+        let mut chunker = state.chunker.lock().await;
         chunker.chunk_semantic(language, path, &source_code)?
     };
 
@@ -603,7 +603,7 @@ async fn handle_file_modified(state: &ServerState, path: &PathBuf) -> Result<()>
 
     // Embed chunks
     let embedded_chunks = {
-        let mut embedding_service = state.embedding_service.lock().unwrap();
+        let mut embedding_service = state.embedding_service.lock().await;
         embedding_service.embed_chunks(chunks)?
     };
 
@@ -716,7 +716,7 @@ async fn search_handler(
 
     // Embed query
     let query_embedding = {
-        let mut embedding_service = state.embedding_service.lock().unwrap();
+        let mut embedding_service = state.embedding_service.lock().await;
         embedding_service.embed_query(&req.query)
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
     };
@@ -784,6 +784,11 @@ fn truncate_content(content: &str, max_len: usize) -> String {
     if content.len() <= max_len {
         content.to_string()
     } else {
-        format!("{}...", &content[..max_len])
+        // Find a valid UTF-8 boundary to avoid panic on multi-byte chars
+        let mut end = max_len;
+        while end > 0 && !content.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &content[..end])
     }
 }

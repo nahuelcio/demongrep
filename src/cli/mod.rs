@@ -173,11 +173,13 @@ pub async fn run() -> Result<()> {
     // Parse model from CLI flag
     let model_type = cli.model.as_ref().and_then(|m| ModelType::from_str(m));
     if cli.model.is_some() && model_type.is_none() {
-        eprintln!("Unknown model: '{}'. Available models:", cli.model.as_ref().unwrap());
-        eprintln!("  minilm-l6, minilm-l6-q, minilm-l12, minilm-l12-q, paraphrase-minilm");
-        eprintln!("  bge-small, bge-small-q, bge-base, nomic-v1, nomic-v1.5, nomic-v1.5-q");
-        eprintln!("  jina-code, e5-multilingual, mxbai-large, modernbert-large");
-        std::process::exit(1);
+        return Err(anyhow::anyhow!(
+            "Unknown model: '{}'. Available models:\n  \
+             minilm-l6, minilm-l6-q, minilm-l12, minilm-l12-q, paraphrase-minilm\n  \
+             bge-small, bge-small-q, bge-base, nomic-v1, nomic-v1.5, nomic-v1.5-q\n  \
+             jina-code, e5-multilingual, mxbai-large, modernbert-large",
+            cli.model.as_ref().unwrap()
+        ));
     }
 
     // Set quiet mode if requested

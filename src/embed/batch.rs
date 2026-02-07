@@ -119,7 +119,9 @@ impl BatchEmbedder {
                 .collect();
 
             // Generate embeddings
-            let embeddings = self.embedder.lock().unwrap().embed_batch(texts)?;
+            let embeddings = self.embedder.lock()
+                .map_err(|e| anyhow::anyhow!("Embedder mutex poisoned: {}", e))?
+                .embed_batch(texts)?;
 
             // Combine chunks with embeddings
             for (chunk, embedding) in chunk_batch.iter().zip(embeddings.into_iter()) {
@@ -141,7 +143,9 @@ impl BatchEmbedder {
     /// Embed a single chunk
     pub fn embed_chunk(&mut self, chunk: Chunk) -> Result<EmbeddedChunk> {
         let text = self.prepare_text(&chunk);
-        let embedding = self.embedder.lock().unwrap().embed_one(&text)?;
+        let embedding = self.embedder.lock()
+            .map_err(|e| anyhow::anyhow!("Embedder mutex poisoned: {}", e))?
+            .embed_one(&text)?;
         Ok(EmbeddedChunk::new(chunk, embedding))
     }
 
@@ -183,13 +187,17 @@ impl BatchEmbedder {
 
     /// Get embedding dimensions
     pub fn dimensions(&self) -> usize {
-        self.embedder.lock().unwrap().dimensions()
+        self.embedder.lock()
+            .map(|e| e.dimensions())
+            .unwrap_or(384) // safe fallback to most common dimension
     }
 
     /// Get embedder (locks mutex and returns copy of embedder for reading)
     pub fn embedder_info(&self) -> (String, usize) {
-        let embedder = self.embedder.lock().unwrap();
-        (embedder.model_name().to_string(), embedder.dimensions())
+        match self.embedder.lock() {
+            Ok(embedder) => (embedder.model_name().to_string(), embedder.dimensions()),
+            Err(_) => ("unknown (lock poisoned)".to_string(), 384),
+        }
     }
 }
 

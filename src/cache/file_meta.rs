@@ -189,12 +189,10 @@ impl FileMetaStore {
 
     /// Set last full index time
     pub fn mark_full_index(&mut self) {
-        self.last_full_index = Some(
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_secs()
-        );
+        self.last_full_index = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .ok();
     }
 }
 

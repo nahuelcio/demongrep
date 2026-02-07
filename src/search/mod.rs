@@ -213,7 +213,7 @@ pub async fn search(
     }
     
     // Sort by score
-    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
 
     // Neural reranking (if enabled)
     let mut rerank_duration = Duration::ZERO;
@@ -356,11 +356,11 @@ pub async fn search(
         files.sort_by(|a, b| {
             b.1.iter().map(|r| r.score).fold(0.0f32, f32::max)
                 .partial_cmp(&a.1.iter().map(|r| r.score).fold(0.0f32, f32::max))
-                .unwrap()
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         for (_file_path, mut file_results) in files {
-            file_results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+            file_results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
             file_results.truncate(per_file);
 
             for (idx, result) in file_results.iter().enumerate() {
@@ -538,7 +538,12 @@ fn print_result(
             .join(" ");
 
         let snippet = if snippet.len() > 100 {
-            format!("{}...", &snippet[..100])
+            // Find a valid UTF-8 boundary to avoid panic on multi-byte chars
+            let mut end = 100;
+            while end > 0 && !snippet.is_char_boundary(end) {
+                end -= 1;
+            }
+            format!("{}...", &snippet[..end])
         } else {
             snippet
         };

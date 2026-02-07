@@ -4,6 +4,7 @@
 pub mod config;
 pub mod chunker;
 pub mod embed;
+pub mod error;
 pub mod rerank;
 pub mod vectordb;
 pub mod cache;
@@ -16,13 +17,14 @@ pub mod file;
 pub mod fts;
 pub mod mcp;
 pub mod output;
-pub mod database;  // NEW: Add database module
+pub mod database;
 
 // Re-export commonly used types
 pub use config::Config;
+pub use error::DemongrepError;
 pub use file::{FileInfo, FileWalker, Language, WalkStats};
 pub use chunker::{Chunk, ChunkKind, Chunker};
 pub use embed::{EmbeddingService, EmbeddedChunk, ModelType, CacheStats};
 pub use vectordb::{VectorStore, SearchResult, StoreStats};
 pub use fts::{FtsStore, FtsResult};
-pub use database::{DatabaseManager, Database, DatabaseType, CombinedStats};  // NEW: Re-export database types
+pub use database::{DatabaseManager, Database, DatabaseType, CombinedStats};

@@ -300,11 +300,8 @@ impl FastEmbedder {
     }
 }
 
-impl Default for FastEmbedder {
-    fn default() -> Self {
-        Self::new().expect("Failed to create default embedder")
-    }
-}
+// NOTE: Default impl removed - FastEmbedder::new() returns Result and must not
+// panic on model load failure. Use FastEmbedder::new() or ::with_model() instead.
 
 #[cfg(test)]
 mod tests {

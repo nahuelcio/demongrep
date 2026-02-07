@@ -102,7 +102,8 @@ impl DemongrepService {
 
     /// Get or initialize the embedding service
     fn get_embedding_service(&self) -> Result<std::sync::MutexGuard<'_, Option<EmbeddingService>>> {
-        let mut guard = self.embedding_service.lock().unwrap();
+        let mut guard = self.embedding_service.lock()
+            .map_err(|e| anyhow::anyhow!("MCP embedding mutex poisoned: {}", e))?;
         if guard.is_none() {
             *guard = Some(EmbeddingService::with_model(self.db_manager.model_type())?);
         }
