@@ -26,8 +26,8 @@ anyhow = "1.0"
 thiserror = "1.0"
 
 # ML & Embeddings
-fastembed = "5.0"
-ort = { version = "2.0.0-rc.10", features = ["download-binaries", "copy-dylibs"] }
+fastembed = { version = "5.8.1", features = ["hf-hub-native-tls", "ort-load-dynamic"] }
+ort = { version = "2.0.0-rc.11", features = ["std", "ndarray", "load-dynamic"] }
 ndarray = "0.16"
 hf-hub = "0.3"
 
@@ -114,5 +114,3 @@ inherits = "release"
 
 [features]
 default = []
-cuda = ["ort/cuda"]        # Enable CUDA GPU acceleration (requires cuDNN)
-tensorrt = ["ort/tensorrt"] # Enable TensorRT acceleration (NVIDIA only)

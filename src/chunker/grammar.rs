@@ -23,8 +23,10 @@ impl GrammarManager {
             grammars: DashMap::new(),
         };
 
-        debug!("GrammarManager initialized with {} pre-compiled grammars",
-               manager.supported_languages().len());
+        debug!(
+            "GrammarManager initialized with {} pre-compiled grammars",
+            manager.supported_languages().len()
+        );
 
         manager
     }
@@ -62,7 +64,7 @@ impl GrammarManager {
             Language::TypeScript => {
                 // TypeScript grammar requires special handling
                 Ok(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
-            },
+            }
             Language::CSharp => Ok(tree_sitter_c_sharp::LANGUAGE.into()),
             Language::Go => Ok(tree_sitter_go::LANGUAGE.into()),
             Language::Java => Ok(tree_sitter_java::LANGUAGE.into()),
@@ -71,7 +73,10 @@ impl GrammarManager {
             Language::Ruby => Ok(tree_sitter_ruby::LANGUAGE.into()),
             Language::Php => Ok(tree_sitter_php::LANGUAGE_PHP.into()),
             Language::Shell => Ok(tree_sitter_bash::LANGUAGE.into()),
-            _ => Err(anyhow!("Language {} does not support tree-sitter", language.name())),
+            _ => Err(anyhow!(
+                "Language {} does not support tree-sitter",
+                language.name()
+            )),
         }
     }
 

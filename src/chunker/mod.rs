@@ -2,17 +2,17 @@ use anyhow::Result;
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
-mod grammar;
-mod parser;
-mod tree_sitter;
-mod fallback;
 mod dedup;
 mod extractor;
+mod fallback;
+mod grammar;
+mod parser;
 mod semantic;
+mod tree_sitter;
 
+pub use grammar::GrammarManager;
+pub use parser::CodeParser;
 pub use semantic::SemanticChunker;
-pub use parser::{CodeParser, ParsedCode};
-pub use grammar::{GrammarManager, GrammarStats};
 
 /// Default number of context lines before/after a chunk
 pub const DEFAULT_CONTEXT_LINES: usize = 3;
@@ -120,13 +120,13 @@ impl Chunk {
     pub fn extract_string_literals(content: &str) -> Vec<String> {
         let mut literals = Vec::new();
         let mut chars = content.chars().peekable();
-        
+
         while let Some(ch) = chars.next() {
             if ch == '"' || ch == '\'' || ch == '`' {
                 let quote = ch;
                 let mut literal = String::new();
                 let mut escaped = false;
-                
+
                 while let Some(ch) = chars.next() {
                     if escaped {
                         escaped = false;
@@ -145,28 +145,28 @@ impl Chunk {
                 }
             }
         }
-        
+
         literals
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChunkKind {
-    Function,      // Standalone function
-    Class,         // Class definition (non-Rust languages)
-    Method,        // Method within class/impl
-    Struct,        // Struct definition (Rust)
-    Enum,          // Enum definition
-    Trait,         // Trait definition (Rust)
-    Interface,     // Interface (TypeScript, Java)
-    Impl,          // Impl block (Rust)
-    Mod,           // Module definition
-    TypeAlias,     // Type alias
-    Const,         // Constant
-    Static,        // Static variable
-    Block,         // Gap/unstructured code
-    Anchor,        // File-level summary chunk
-    Other,         // Catch-all
+    Function,  // Standalone function
+    Class,     // Class definition (non-Rust languages)
+    Method,    // Method within class/impl
+    Struct,    // Struct definition (Rust)
+    Enum,      // Enum definition
+    Trait,     // Trait definition (Rust)
+    Interface, // Interface (TypeScript, Java)
+    Impl,      // Impl block (Rust)
+    Mod,       // Module definition
+    TypeAlias, // Type alias
+    Const,     // Constant
+    Static,    // Static variable
+    Block,     // Gap/unstructured code
+    Anchor,    // File-level summary chunk
+    Other,     // Catch-all
 }
 
 /// Trait for chunking strategies
@@ -192,24 +192,24 @@ mod tests {
             let headers = [("API-VERSION", "2")];
             let msg = `template string`;
         "#;
-        
+
         let literals = Chunk::extract_string_literals(code);
-        
+
         assert!(literals.contains(&"hello".to_string()));
         assert!(literals.contains(&"world".to_string()));
         assert!(literals.contains(&"API-VERSION".to_string()));
         assert!(literals.contains(&"2".to_string()));
         assert!(literals.contains(&"template string".to_string()));
-        
+
         assert_eq!(literals.len(), 5);
     }
 
     #[test]
     fn test_extract_string_literals_with_escapes() {
         let code = "let msg = \"Hello \\\"World\\\"!\";";
-        
+
         let literals = Chunk::extract_string_literals(code);
-        
+
         assert_eq!(literals.len(), 1);
         assert_eq!(literals[0], "Hello \"World\"!");
     }

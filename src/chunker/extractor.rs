@@ -1,5 +1,5 @@
-use crate::file::Language;
 use super::ChunkKind;
+use crate::file::Language;
 use tree_sitter::Node;
 
 /// Language-specific code extraction logic
@@ -250,8 +250,9 @@ impl LanguageExtractor for RustExtractor {
                 if prev.kind() == "line_comment" || prev.kind() == "block_comment" {
                     if let Ok(text) = prev.utf8_text(source) {
                         // Check if it's a doc comment (/// or /**)
-                        if text.trim_start().starts_with("///") ||
-                           text.trim_start().starts_with("/**") {
+                        if text.trim_start().starts_with("///")
+                            || text.trim_start().starts_with("/**")
+                        {
                             return Some(text.to_string());
                         }
                     }
@@ -530,7 +531,7 @@ impl LanguageExtractor for CSharpExtractor {
     fn definition_types(&self) -> &[&'static str] {
         &[
             "method_declaration",
-            "class_declaration", 
+            "class_declaration",
             "struct_declaration",
             "interface_declaration",
             "enum_declaration",
@@ -553,7 +554,7 @@ impl LanguageExtractor for CSharpExtractor {
         match node.kind() {
             "method_declaration" => {
                 let mut sig = String::new();
-                
+
                 // Return type
                 if let Some(ret) = node.child_by_field_name("type") {
                     if let Ok(text) = ret.utf8_text(source) {
@@ -561,53 +562,53 @@ impl LanguageExtractor for CSharpExtractor {
                         sig.push(' ');
                     }
                 }
-                
+
                 // Name
                 if let Some(name) = node.child_by_field_name("name") {
                     if let Ok(text) = name.utf8_text(source) {
                         sig.push_str(text);
                     }
                 }
-                
+
                 // Type parameters
                 if let Some(type_params) = node.child_by_field_name("type_parameters") {
                     if let Ok(text) = type_params.utf8_text(source) {
                         sig.push_str(text);
                     }
                 }
-                
+
                 // Parameters
                 if let Some(params) = node.child_by_field_name("parameters") {
                     if let Ok(text) = params.utf8_text(source) {
                         sig.push_str(text);
                     }
                 }
-                
+
                 Some(sig)
             }
             "class_declaration" | "struct_declaration" | "interface_declaration" => {
                 let keyword = match node.kind() {
                     "class_declaration" => "class",
-                    "struct_declaration" => "struct", 
+                    "struct_declaration" => "struct",
                     "interface_declaration" => "interface",
                     _ => return None,
                 };
-                
+
                 let mut sig = String::from(keyword);
                 sig.push(' ');
-                
+
                 if let Some(name) = node.child_by_field_name("name") {
                     if let Ok(text) = name.utf8_text(source) {
                         sig.push_str(text);
                     }
                 }
-                
+
                 if let Some(type_params) = node.child_by_field_name("type_parameters") {
                     if let Ok(text) = type_params.utf8_text(source) {
                         sig.push_str(text);
                     }
                 }
-                
+
                 Some(sig)
             }
             _ => None,
@@ -624,8 +625,9 @@ impl LanguageExtractor for CSharpExtractor {
             if let Some(prev) = parent.named_child(node_index - 1) {
                 if prev.kind() == "comment" {
                     if let Ok(text) = prev.utf8_text(source) {
-                        if text.trim_start().starts_with("///") || 
-                           text.trim_start().starts_with("/**") {
+                        if text.trim_start().starts_with("///")
+                            || text.trim_start().starts_with("/**")
+                        {
                             return Some(text.to_string());
                         }
                     }
@@ -690,61 +692,61 @@ impl LanguageExtractor for GoExtractor {
         match node.kind() {
             "function_declaration" => {
                 let mut sig = String::from("func ");
-                
+
                 if let Some(name) = node.child_by_field_name("name") {
                     if let Ok(text) = name.utf8_text(source) {
                         sig.push_str(text);
                     }
                 }
-                
+
                 if let Some(params) = node.child_by_field_name("parameters") {
                     if let Ok(text) = params.utf8_text(source) {
                         sig.push_str(text);
                     }
                 }
-                
+
                 if let Some(result) = node.child_by_field_name("result") {
                     if let Ok(text) = result.utf8_text(source) {
                         sig.push(' ');
                         sig.push_str(text);
                     }
                 }
-                
+
                 Some(sig)
             }
             "method_declaration" => {
                 let mut sig = String::from("func ");
-                
+
                 if let Some(receiver) = node.child_by_field_name("receiver") {
                     if let Ok(text) = receiver.utf8_text(source) {
                         sig.push_str(text);
                         sig.push(' ');
                     }
                 }
-                
+
                 if let Some(name) = node.child_by_field_name("name") {
                     if let Ok(text) = name.utf8_text(source) {
                         sig.push_str(text);
                     }
                 }
-                
+
                 if let Some(params) = node.child_by_field_name("parameters") {
                     if let Ok(text) = params.utf8_text(source) {
                         sig.push_str(text);
                     }
                 }
-                
+
                 Some(sig)
             }
             "type_spec" => {
                 let mut sig = String::from("type ");
-                
+
                 if let Some(name) = node.child_by_field_name("name") {
                     if let Ok(text) = name.utf8_text(source) {
                         sig.push_str(text);
                     }
                 }
-                
+
                 Some(sig)
             }
             _ => None,
@@ -803,26 +805,26 @@ impl LanguageExtractor for JavaExtractor {
         match node.kind() {
             "method_declaration" => {
                 let mut sig = String::new();
-                
+
                 if let Some(ret) = node.child_by_field_name("type") {
                     if let Ok(text) = ret.utf8_text(source) {
                         sig.push_str(text);
                         sig.push(' ');
                     }
                 }
-                
+
                 if let Some(name) = node.child_by_field_name("name") {
                     if let Ok(text) = name.utf8_text(source) {
                         sig.push_str(text);
                     }
                 }
-                
+
                 if let Some(params) = node.child_by_field_name("parameters") {
                     if let Ok(text) = params.utf8_text(source) {
                         sig.push_str(text);
                     }
                 }
-                
+
                 Some(sig)
             }
             "class_declaration" | "interface_declaration" | "enum_declaration" => {
@@ -832,16 +834,16 @@ impl LanguageExtractor for JavaExtractor {
                     "enum_declaration" => "enum",
                     _ => return None,
                 };
-                
+
                 let mut sig = String::from(keyword);
                 sig.push(' ');
-                
+
                 if let Some(name) = node.child_by_field_name("name") {
                     if let Ok(text) = name.utf8_text(source) {
                         sig.push_str(text);
                     }
                 }
-                
+
                 Some(sig)
             }
             _ => None,
@@ -936,33 +938,37 @@ impl LanguageExtractor for CppExtractor {
             "function_definition" => {
                 // Try to get just the declaration part without body
                 let mut sig = String::new();
-                
+
                 if let Some(ret) = node.child_by_field_name("type") {
                     if let Ok(text) = ret.utf8_text(source) {
                         sig.push_str(text);
                         sig.push(' ');
                     }
                 }
-                
+
                 if let Some(declarator) = node.child_by_field_name("declarator") {
                     if let Ok(text) = declarator.utf8_text(source) {
                         sig.push_str(text);
                     }
                 }
-                
+
                 Some(sig)
             }
             "struct_specifier" | "class_specifier" => {
-                let keyword = if node.kind() == "struct_specifier" { "struct" } else { "class" };
+                let keyword = if node.kind() == "struct_specifier" {
+                    "struct"
+                } else {
+                    "class"
+                };
                 let mut sig = String::from(keyword);
                 sig.push(' ');
-                
+
                 if let Some(name) = node.child_by_field_name("name") {
                     if let Ok(text) = name.utf8_text(source) {
                         sig.push_str(text);
                     }
                 }
-                
+
                 Some(sig)
             }
             _ => None,
@@ -1005,12 +1011,7 @@ pub struct RubyExtractor;
 
 impl LanguageExtractor for RubyExtractor {
     fn definition_types(&self) -> &[&'static str] {
-        &[
-            "method",
-            "singleton_method",
-            "class",
-            "module",
-        ]
+        &["method", "singleton_method", "class", "module"]
     }
 
     fn extract_name(&self, node: Node, source: &[u8]) -> Option<String> {
@@ -1024,41 +1025,41 @@ impl LanguageExtractor for RubyExtractor {
         match node.kind() {
             "method" | "singleton_method" => {
                 let mut sig = String::from("def ");
-                
+
                 if let Some(name) = node.child_by_field_name("name") {
                     if let Ok(text) = name.utf8_text(source) {
                         sig.push_str(text);
                     }
                 }
-                
+
                 if let Some(params) = node.child_by_field_name("parameters") {
                     if let Ok(text) = params.utf8_text(source) {
                         sig.push_str(text);
                     }
                 }
-                
+
                 Some(sig)
             }
             "class" => {
                 let mut sig = String::from("class ");
-                
+
                 if let Some(name) = node.child_by_field_name("name") {
                     if let Ok(text) = name.utf8_text(source) {
                         sig.push_str(text);
                     }
                 }
-                
+
                 Some(sig)
             }
             "module" => {
                 let mut sig = String::from("module ");
-                
+
                 if let Some(name) = node.child_by_field_name("name") {
                     if let Ok(text) = name.utf8_text(source) {
                         sig.push_str(text);
                     }
                 }
-                
+
                 Some(sig)
             }
             _ => None,
@@ -1124,52 +1125,52 @@ impl LanguageExtractor for PhpExtractor {
         match node.kind() {
             "function_definition" | "method_declaration" => {
                 let mut sig = String::from("function ");
-                
+
                 if let Some(name) = node.child_by_field_name("name") {
                     if let Ok(text) = name.utf8_text(source) {
                         sig.push_str(text);
                     }
                 }
-                
+
                 if let Some(params) = node.child_by_field_name("parameters") {
                     if let Ok(text) = params.utf8_text(source) {
                         sig.push_str(text);
                     }
                 }
-                
+
                 Some(sig)
             }
             "class_declaration" => {
                 let mut sig = String::from("class ");
-                
+
                 if let Some(name) = node.child_by_field_name("name") {
                     if let Ok(text) = name.utf8_text(source) {
                         sig.push_str(text);
                     }
                 }
-                
+
                 Some(sig)
             }
             "interface_declaration" => {
                 let mut sig = String::from("interface ");
-                
+
                 if let Some(name) = node.child_by_field_name("name") {
                     if let Ok(text) = name.utf8_text(source) {
                         sig.push_str(text);
                     }
                 }
-                
+
                 Some(sig)
             }
             "trait_declaration" => {
                 let mut sig = String::from("trait ");
-                
+
                 if let Some(name) = node.child_by_field_name("name") {
                     if let Ok(text) = name.utf8_text(source) {
                         sig.push_str(text);
                     }
                 }
-                
+
                 Some(sig)
             }
             _ => None,
@@ -1213,9 +1214,7 @@ pub struct BashExtractor;
 
 impl LanguageExtractor for BashExtractor {
     fn definition_types(&self) -> &[&'static str] {
-        &[
-            "function_definition",
-        ]
+        &["function_definition"]
     }
 
     fn extract_name(&self, node: Node, source: &[u8]) -> Option<String> {
@@ -1228,13 +1227,13 @@ impl LanguageExtractor for BashExtractor {
     fn extract_signature(&self, node: Node, source: &[u8]) -> Option<String> {
         if node.kind() == "function_definition" {
             let mut sig = String::from("function ");
-            
+
             if let Some(name) = node.child_by_field_name("name") {
                 if let Ok(text) = name.utf8_text(source) {
                     sig.push_str(text);
                 }
             }
-            
+
             Some(sig)
         } else {
             None

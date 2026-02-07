@@ -134,10 +134,7 @@ impl SemanticChunker {
 
         if is_definition {
             // Mark this range as covered (not a gap)
-            gap_tracker.mark_covered(
-                node.start_position().row,
-                node.end_position().row,
-            );
+            gap_tracker.mark_covered(node.start_position().row, node.end_position().row);
 
             // Extract metadata using the language extractor
             let kind = extractor.classify(node);
@@ -146,7 +143,8 @@ impl SemanticChunker {
             let docstring = extractor.extract_docstring(node, source);
 
             // Build label for context breadcrumb
-            let label = extractor.build_label(node, source)
+            let label = extractor
+                .build_label(node, source)
                 .or_else(|| name.as_ref().map(|n| format!("{:?}: {}", kind, n)))
                 .unwrap_or_else(|| format!("{:?}", kind));
 
@@ -161,7 +159,8 @@ impl SemanticChunker {
             };
 
             // Create chunk
-            let path_str = context_stack.first()
+            let path_str = context_stack
+                .first()
                 .map(|s| s.strip_prefix("File: ").unwrap_or(s))
                 .unwrap_or("")
                 .to_string();
@@ -210,7 +209,8 @@ impl SemanticChunker {
 
             if !chunk_lines.is_empty() {
                 let content = chunk_lines.join("\n");
-                let mut chunk = Chunk::new(content.clone(), i, end, ChunkKind::Block, path_str.clone());
+                let mut chunk =
+                    Chunk::new(content.clone(), i, end, ChunkKind::Block, path_str.clone());
                 chunk.context = context.clone();
                 chunk.string_literals = Chunk::extract_string_literals(&content);
                 chunks.push(chunk);
@@ -280,7 +280,10 @@ impl SemanticChunker {
                     "// [Part {}/{}] {}\n",
                     idx + 1,
                     total_parts,
-                    chunk.signature.as_ref().unwrap_or(&"(continued)".to_string())
+                    chunk
+                        .signature
+                        .as_ref()
+                        .unwrap_or(&"(continued)".to_string())
                 );
                 chunk.content = header + &chunk.content;
             }
@@ -359,13 +362,8 @@ impl<'a> GapTracker<'a> {
                     // Only create chunk if gap is not empty/whitespace
                     if !gap_content.trim().is_empty() {
                         let kind = Self::classify_gap(&gap_content);
-                        let mut chunk = Chunk::new(
-                            gap_content.clone(),
-                            start,
-                            i,
-                            kind,
-                            path_str.clone(),
-                        );
+                        let mut chunk =
+                            Chunk::new(gap_content.clone(), start, i, kind, path_str.clone());
                         chunk.context = context.clone();
                         chunk.string_literals = Chunk::extract_string_literals(&gap_content);
                         gaps.push(chunk);
@@ -404,13 +402,14 @@ impl<'a> GapTracker<'a> {
         let trimmed = content.trim();
 
         // Check if it's mostly imports
-        let import_count = trimmed.lines()
+        let import_count = trimmed
+            .lines()
             .filter(|line| {
                 let line = line.trim();
-                line.starts_with("import ") ||
-                line.starts_with("from ") ||
-                line.starts_with("use ") ||
-                line.starts_with("#include")
+                line.starts_with("import ")
+                    || line.starts_with("from ")
+                    || line.starts_with("use ")
+                    || line.starts_with("#include")
             })
             .count();
 
@@ -460,19 +459,30 @@ struct Point {
 "#;
 
         let path = Path::new("test.rs");
-        let chunks = chunker.chunk_semantic(Language::Rust, path, rust_code).unwrap();
+        let chunks = chunker
+            .chunk_semantic(Language::Rust, path, rust_code)
+            .unwrap();
 
         // Should have at least 3 definition chunks (2 functions + 1 struct)
-        assert!(chunks.len() >= 3, "Expected at least 3 chunks, got {}", chunks.len());
+        assert!(
+            chunks.len() >= 3,
+            "Expected at least 3 chunks, got {}",
+            chunks.len()
+        );
 
         // Check that we have function chunks
-        let function_chunks: Vec<_> = chunks.iter()
+        let function_chunks: Vec<_> = chunks
+            .iter()
             .filter(|c| c.kind == ChunkKind::Function)
             .collect();
-        assert!(function_chunks.len() >= 2, "Expected at least 2 function chunks");
+        assert!(
+            function_chunks.len() >= 2,
+            "Expected at least 2 function chunks"
+        );
 
         // Check that first function has signature
-        let hello_chunk = function_chunks.iter()
+        let hello_chunk = function_chunks
+            .iter()
             .find(|c| c.content.contains("hello_world"));
         assert!(hello_chunk.is_some(), "Should find hello_world function");
 
@@ -500,26 +510,32 @@ class Calculator:
 "#;
 
         let path = Path::new("test.py");
-        let chunks = chunker.chunk_semantic(Language::Python, path, python_code).unwrap();
+        let chunks = chunker
+            .chunk_semantic(Language::Python, path, python_code)
+            .unwrap();
 
         // Should have at least 2 chunks (function + class)
         assert!(chunks.len() >= 2, "Expected at least 2 chunks");
 
         // Check for docstrings
-        let chunks_with_docs: Vec<_> = chunks.iter()
-            .filter(|c| c.docstring.is_some())
-            .collect();
-        assert!(!chunks_with_docs.is_empty(), "Should have chunks with docstrings");
+        let chunks_with_docs: Vec<_> = chunks.iter().filter(|c| c.docstring.is_some()).collect();
+        assert!(
+            !chunks_with_docs.is_empty(),
+            "Should have chunks with docstrings"
+        );
     }
 
     #[test]
     fn test_chunk_unsupported_language() {
         let mut chunker = SemanticChunker::new(100, 2000, 10);
 
-        let content = "Some random text file\nWith multiple lines\nThat should be chunked\nAs fallback";
+        let content =
+            "Some random text file\nWith multiple lines\nThat should be chunked\nAs fallback";
         let path = Path::new("test.txt");
 
-        let chunks = chunker.chunk_semantic(Language::Unknown, path, content).unwrap();
+        let chunks = chunker
+            .chunk_semantic(Language::Unknown, path, content)
+            .unwrap();
 
         // Should use fallback chunking
         assert!(!chunks.is_empty());
@@ -549,7 +565,10 @@ class Calculator:
     fn test_chunk_splitting() {
         let chunker = SemanticChunker::new(5, 100, 1); // Very small limit
 
-        let large_content = (0..20).map(|i| format!("line {}", i)).collect::<Vec<_>>().join("\n");
+        let large_content = (0..20)
+            .map(|i| format!("line {}", i))
+            .collect::<Vec<_>>()
+            .join("\n");
         let chunk = Chunk::new(
             large_content,
             0,
@@ -565,8 +584,14 @@ class Calculator:
 
         // All splits should be marked as incomplete
         for split in &splits {
-            assert!(!split.is_complete, "Split chunks should be marked incomplete");
-            assert!(split.split_index.is_some(), "Split chunks should have index");
+            assert!(
+                !split.is_complete,
+                "Split chunks should be marked incomplete"
+            );
+            assert!(
+                split.split_index.is_some(),
+                "Split chunks should have index"
+            );
         }
     }
 
@@ -583,11 +608,12 @@ impl MyStruct {
 "#;
 
         let path = Path::new("test.rs");
-        let chunks = chunker.chunk_semantic(Language::Rust, path, rust_code).unwrap();
+        let chunks = chunker
+            .chunk_semantic(Language::Rust, path, rust_code)
+            .unwrap();
 
         // Find method chunk
-        let method_chunk = chunks.iter()
-            .find(|c| c.kind == ChunkKind::Method);
+        let method_chunk = chunks.iter().find(|c| c.kind == ChunkKind::Method);
 
         if let Some(chunk) = method_chunk {
             // Should have context: File > Impl > Method

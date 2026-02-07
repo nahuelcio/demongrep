@@ -1,7 +1,6 @@
 use crate::info_print;
 use anyhow::{anyhow, Result};
 use fastembed::{EmbeddingModel as FastEmbedModel, InitOptions, TextEmbedding};
-use ort::execution_providers::CPUExecutionProvider;
 
 /// Available embedding models
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,9 +90,7 @@ impl ModelType {
             | Self::NomicEmbedTextV15Q
             | Self::JinaEmbeddingsV2BaseCode => 768,
             // 1024 dimensions
-            Self::BGELargeENV15
-            | Self::MxbaiEmbedLargeV1
-            | Self::ModernBertEmbedLarge => 1024,
+            Self::BGELargeENV15 | Self::MxbaiEmbedLargeV1 | Self::ModernBertEmbedLarge => 1024,
         }
     }
 
@@ -221,17 +218,10 @@ impl FastEmbedder {
         info_print!("📦 Loading embedding model: {}", model_type.name());
         info_print!("   Dimensions: {}", model_type.dimensions());
 
-        // Use CPU execution provider with arena allocator for better memory performance
-        let cpu_ep = CPUExecutionProvider::default()
-            .with_arena_allocator(true)
-            .build();
-
         let model = TextEmbedding::try_new(
-            InitOptions::new(model_type.to_fastembed_model())
-                .with_show_download_progress(true)
-                .with_execution_providers(vec![cpu_ep])
+            InitOptions::new(model_type.to_fastembed_model()).with_show_download_progress(true),
         )
-            .map_err(|e| anyhow!("Failed to initialize embedding model: {}", e))?;
+        .map_err(|e| anyhow!("Failed to initialize embedding model: {}", e))?;
 
         info_print!("✅ Model loaded successfully!");
 
@@ -250,16 +240,20 @@ impl FastEmbedder {
             // Benchmarked on 12-core/24-thread CPU - batch size has minimal impact
             // when CPU is saturated, but larger batches slightly more efficient
             match self.model_type.dimensions() {
-                d if d <= 384 => 256,  // Small models: larger batches OK
-                d if d <= 768 => 128,  // Medium models
-                _ => 64,               // Large models: smaller to avoid OOM
+                d if d <= 384 => 256, // Small models: larger batches OK
+                d if d <= 768 => 128, // Medium models
+                _ => 64,              // Large models: smaller to avoid OOM
             }
         };
         self.embed_batch_chunked(texts, batch_size)
     }
 
     /// Embed a batch of texts with configurable mini-batch size
-    pub fn embed_batch_chunked(&mut self, texts: Vec<String>, batch_size: usize) -> Result<Vec<Vec<f32>>> {
+    pub fn embed_batch_chunked(
+        &mut self,
+        texts: Vec<String>,
+        batch_size: usize,
+    ) -> Result<Vec<Vec<f32>>> {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
@@ -339,8 +333,14 @@ mod tests {
     #[test]
     fn test_model_type_names() {
         assert_eq!(ModelType::BGESmallENV15.name(), "BAAI/bge-small-en-v1.5");
-        assert_eq!(ModelType::AllMiniLML6V2.name(), "sentence-transformers/all-MiniLM-L6-v2");
-        assert_eq!(ModelType::JinaEmbeddingsV2BaseCode.name(), "jinaai/jina-embeddings-v2-base-code");
+        assert_eq!(
+            ModelType::AllMiniLML6V2.name(),
+            "sentence-transformers/all-MiniLM-L6-v2"
+        );
+        assert_eq!(
+            ModelType::JinaEmbeddingsV2BaseCode.name(),
+            "jinaai/jina-embeddings-v2-base-code"
+        );
     }
 
     #[test]
@@ -358,9 +358,18 @@ mod tests {
 
     #[test]
     fn test_from_str() {
-        assert_eq!(ModelType::from_str("bge-small"), Some(ModelType::BGESmallENV15));
-        assert_eq!(ModelType::from_str("jina-code"), Some(ModelType::JinaEmbeddingsV2BaseCode));
-        assert_eq!(ModelType::from_str("minilm-l6-q"), Some(ModelType::AllMiniLML6V2Q));
+        assert_eq!(
+            ModelType::from_str("bge-small"),
+            Some(ModelType::BGESmallENV15)
+        );
+        assert_eq!(
+            ModelType::from_str("jina-code"),
+            Some(ModelType::JinaEmbeddingsV2BaseCode)
+        );
+        assert_eq!(
+            ModelType::from_str("minilm-l6-q"),
+            Some(ModelType::AllMiniLML6V2Q)
+        );
         assert_eq!(ModelType::from_str("unknown"), None);
     }
 
