@@ -306,7 +306,8 @@ handle_permissions() {
 # Install binary
 install_binary() {
     local binary=$1
-    local install_dir=$2
+    local extract_dir=$2
+    local install_dir=$3
     
     # Ensure install directory exists
     if [ ! -d "$install_dir" ]; then
@@ -324,9 +325,45 @@ install_binary() {
     # Copy to installation directory
     log_info "Installing to $install_dir..."
     
-    if cp "$binary" "$install_dir/demongrep"; then
-        log_success "Installed to $install_dir/demongrep"
-        
+    if cp "$binary" "$install_dir/demongrep-bin"; then
+        chmod +x "$install_dir/demongrep-bin"
+        log_success "Installed binary to $install_dir/demongrep-bin"
+
+        # Copy ONNX Runtime dynamic libraries when bundled in release artifact
+        local runtime_libs
+        runtime_libs=$(find "$extract_dir" -maxdepth 2 -type f \( -name "libonnxruntime*.dylib" -o -name "libonnxruntime*.so*" \) 2>/dev/null || true)
+        if [ -n "$runtime_libs" ]; then
+            while IFS= read -r lib; do
+                cp "$lib" "$install_dir/"
+                chmod +r "$install_dir/$(basename "$lib")"
+            done <<< "$runtime_libs"
+            log_success "Installed ONNX Runtime libraries"
+
+            # Write a launcher that injects local runtime library path.
+            cat > "$install_dir/demongrep" << 'EOF'
+#!/bin/sh
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+if [ -n "${DYLD_LIBRARY_PATH:-}" ]; then
+  export DYLD_LIBRARY_PATH="$SCRIPT_DIR:$DYLD_LIBRARY_PATH"
+else
+  export DYLD_LIBRARY_PATH="$SCRIPT_DIR"
+fi
+if [ -n "${LD_LIBRARY_PATH:-}" ]; then
+  export LD_LIBRARY_PATH="$SCRIPT_DIR:$LD_LIBRARY_PATH"
+else
+  export LD_LIBRARY_PATH="$SCRIPT_DIR"
+fi
+exec "$SCRIPT_DIR/demongrep-bin" "$@"
+EOF
+            chmod +x "$install_dir/demongrep"
+            log_success "Installed launcher to $install_dir/demongrep"
+        else
+            # Fallback: if no runtime libs bundled, expose binary directly.
+            cp "$install_dir/demongrep-bin" "$install_dir/demongrep"
+            chmod +x "$install_dir/demongrep"
+            log_warning "No ONNX Runtime libraries found in archive"
+        fi
+
         # Verify installation
         if [ -x "$install_dir/demongrep" ]; then
             return 0
@@ -430,7 +467,7 @@ main() {
     fi
     
     # Install
-    if ! install_binary "$binary" "$install_dir"; then
+    if ! install_binary "$binary" "$extract_dir" "$install_dir"; then
         exit 1
     fi
     

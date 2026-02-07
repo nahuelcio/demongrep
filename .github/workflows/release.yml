@@ -7,6 +7,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  ORT_VERSION: 1.23.1
 
 jobs:
   build:
@@ -83,28 +84,28 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           cd target/${{ matrix.target }}/release
-          wget -q https://github.com/microsoft/onnxruntime/releases/download/v1.16.3/onnxruntime-linux-x64-1.16.3.tgz
-          tar xzf onnxruntime-linux-x64-1.16.3.tgz
-          cp onnxruntime-linux-x64-1.16.3/lib/libonnxruntime.so* .
-          rm -rf onnxruntime-linux-x64-1.16.3 onnxruntime-linux-x64-1.16.3.tgz
+          wget -q https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-${ORT_VERSION}.tgz
+          tar xzf onnxruntime-linux-x64-${ORT_VERSION}.tgz
+          cp onnxruntime-linux-x64-${ORT_VERSION}/lib/libonnxruntime.so* .
+          rm -rf onnxruntime-linux-x64-${ORT_VERSION} onnxruntime-linux-x64-${ORT_VERSION}.tgz
 
       - name: Download ONNX Runtime (macOS x86_64)
         if: runner.os == 'macOS' && matrix.target == 'x86_64-apple-darwin'
         run: |
           cd target/${{ matrix.target }}/release
-          curl -L -o onnxruntime.tgz https://github.com/microsoft/onnxruntime/releases/download/v1.16.3/onnxruntime-osx-x86_64-1.16.3.tgz
+          curl -L -o onnxruntime.tgz https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-osx-x86_64-${ORT_VERSION}.tgz
           tar xzf onnxruntime.tgz
-          cp onnxruntime-osx-x86_64-1.16.3/lib/libonnxruntime*.dylib .
-          rm -rf onnxruntime-osx-x86_64-1.16.3 onnxruntime.tgz
+          cp onnxruntime-osx-x86_64-${ORT_VERSION}/lib/libonnxruntime*.dylib .
+          rm -rf onnxruntime-osx-x86_64-${ORT_VERSION} onnxruntime.tgz
 
       - name: Download ONNX Runtime (macOS ARM64)
         if: runner.os == 'macOS' && matrix.target == 'aarch64-apple-darwin'
         run: |
           cd target/${{ matrix.target }}/release
-          curl -L -o onnxruntime.tgz https://github.com/microsoft/onnxruntime/releases/download/v1.16.3/onnxruntime-osx-arm64-1.16.3.tgz
+          curl -L -o onnxruntime.tgz https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-osx-arm64-${ORT_VERSION}.tgz
           tar xzf onnxruntime.tgz
-          cp onnxruntime-osx-arm64-1.16.3/lib/libonnxruntime*.dylib .
-          rm -rf onnxruntime-osx-arm64-1.16.3 onnxruntime.tgz
+          cp onnxruntime-osx-arm64-${ORT_VERSION}/lib/libonnxruntime*.dylib .
+          rm -rf onnxruntime-osx-arm64-${ORT_VERSION} onnxruntime.tgz
 
       - name: Download ONNX Runtime (Windows)
         if: runner.os == 'Windows'
