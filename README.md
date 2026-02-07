@@ -46,25 +46,68 @@ Search your codebase using natural language queries like *"where do we handle au
 
 ## Installation
 
-### Prerequisites
+### Quick Install (Recommended)
 
-#### Linux (Ubuntu/Debian)
+The fastest way to get started:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/nahuelcio/demongrep/main/install.sh | bash
+```
+
+This automatically:
+- Detects your OS (Linux, macOS, Windows)
+- Downloads the appropriate pre-built binary
+- Installs to `/usr/local/bin/` (or equivalent on Windows)
+- Sets up PATH if needed
+
+### GitHub Releases (Pre-built Binaries)
+
+Download pre-built binaries directly from [GitHub Releases](https://github.com/nahuelcio/demongrep/releases):
+
+**Available for:**
+- Linux x86_64
+- macOS x86_64
+- macOS ARM64 (Apple Silicon)
+- Windows x64
+
+**Steps:**
+1. Go to https://github.com/nahuelcio/demongrep/releases
+2. Download the binary for your platform
+3. Extract and add to your PATH, or run directly
+
+### cargo install
+
+If you have Rust installed:
+
+```bash
+cargo install demongrep
+```
+
+This builds from source and installs to your Cargo bin directory (usually `~/.cargo/bin/`).
+
+### Build from Source
+
+For development or custom builds:
+
+#### Prerequisites
+
+##### Linux (Ubuntu/Debian)
 ```bash
 sudo apt-get update
 sudo apt-get install -y build-essential protobuf-compiler libssl-dev pkg-config
 ```
 
-#### Linux (Fedora/RHEL)
+##### Linux (Fedora/RHEL)
 ```bash
 sudo dnf install -y gcc protobuf-compiler openssl-devel pkg-config
 ```
 
-#### macOS
+##### macOS
 ```bash
 brew install protobuf openssl pkg-config
 ```
 
-#### Windows
+##### Windows
 ```powershell
 # Using winget
 winget install -e --id Google.Protobuf
@@ -73,11 +116,11 @@ winget install -e --id Google.Protobuf
 choco install protoc
 ```
 
-### Building from Source
+#### Build Steps
 
 ```bash
 # Clone the repository
-git clone https://github.com/yxanul/demongrep.git
+git clone https://github.com/nahuelcio/demongrep.git
 cd demongrep
 
 # Build release binary
@@ -94,6 +137,21 @@ sudo cp target/release/demongrep /usr/local/bin/
 demongrep --version
 demongrep doctor  # Check system health
 ```
+
+### Claude Code Integration
+
+To integrate demongrep with Claude Code as an MCP server:
+
+```bash
+demongrep install-claude-code
+```
+
+This command:
+- Configures the MCP server in Claude Code's settings
+- Sets up automatic indexing for your projects
+- Enables semantic search in Claude Code
+
+For manual setup, see [MCP Server section](#mcp-server-claude-code-integration).
 
 ---
 

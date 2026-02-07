@@ -158,6 +158,13 @@ pub enum Commands {
         /// Path to project (defaults to current directory)
         path: Option<PathBuf>,
     },
+
+    /// Configure Claude Code MCP integration
+    InstallClaudeCode {
+        /// Install for global/user configuration instead of local project
+        #[arg(short, long)]
+        global: bool,
+    },
 }
 
 pub async fn run() -> Result<()> {
@@ -228,11 +235,13 @@ pub async fn run() -> Result<()> {
         Commands::List => crate::index::list().await,
         Commands::Stats { path } => crate::index::stats(path).await,
         Commands::Clear { path, yes, project } => crate::index::clear(path, yes, project).await,
-        Commands::Doctor => crate::cli::doctor::run().await,
-        Commands::Setup { model } => crate::cli::setup::run(model).await,
-        Commands::Mcp { path } => crate::mcp::run_mcp_server(path).await,
-    }
-}
-
-mod doctor;
-mod setup;
+         Commands::Doctor => crate::cli::doctor::run().await,
+         Commands::Setup { model } => crate::cli::setup::run(model).await,
+         Commands::Mcp { path } => crate::mcp::run_mcp_server(path).await,
+         Commands::InstallClaudeCode { global } => crate::cli::install_claude_code::run(global),
+     }
+ }
+ 
+ mod doctor;
+ mod setup;
+ mod install_claude_code;
