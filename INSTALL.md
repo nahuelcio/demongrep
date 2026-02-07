@@ -194,6 +194,12 @@ Troubleshooting guides:
 - `docs/agents/opencode.md`
 - `docs/agents/troubleshooting.md`
 
+Install Codex skill pack (optional):
+
+```bash
+demongrep add-skills
+```
+
 ## Uninstalling
 
 Remove demongrep from your system:

@@ -34,6 +34,7 @@ Search your codebase using natural language queries like *"where do we handle au
   - [install-claude-code](#install-claude-code)
   - [install-codex](#install-codex)
   - [install-opencode](#install-opencode)
+  - [add-skills](#add-skills)
 - [Global Options](#global-options)
 - [Search Modes](#search-modes)
 - [MCP Server (Coding Agents)](#mcp-server-coding-agent-integration)
@@ -488,6 +489,21 @@ Configure OpenCode MCP integration.
 
 ```bash
 demongrep install-opencode [--project-path PATH] [--dry-run]
+```
+
+### add-skills
+
+Install demongrep Codex skills into `~/.codex/skills`.
+
+```bash
+demongrep add-skills
+```
+
+Optional:
+
+```bash
+demongrep add-skills --ref v0.1.4
+demongrep add-skills --dest ~/.codex/skills
 ```
 
 ---

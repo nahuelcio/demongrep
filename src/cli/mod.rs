@@ -207,6 +207,21 @@ pub enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
+
+    /// Install demongrep coding-agent skills into Codex
+    AddSkills {
+        /// Skill name to install
+        #[arg(long, default_value = "demongrep-agent-workflows")]
+        skill: String,
+
+        /// Git ref (tag/branch) to install from (defaults to current demongrep version tag)
+        #[arg(long = "ref")]
+        ref_name: Option<String>,
+
+        /// Destination skills directory (defaults to ~/.codex/skills)
+        #[arg(long)]
+        dest: Option<PathBuf>,
+    },
 }
 
 pub async fn run() -> Result<()> {
@@ -308,9 +323,15 @@ pub async fn run() -> Result<()> {
             project_path,
             dry_run,
         } => crate::cli::install_opencode::run(project_path, dry_run),
+        Commands::AddSkills {
+            skill,
+            ref_name,
+            dest,
+        } => crate::cli::add_skills::run(skill, ref_name, dest),
     }
 }
 
+mod add_skills;
 mod doctor;
 mod install_claude_code;
 mod install_codex;
