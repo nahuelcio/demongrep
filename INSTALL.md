@@ -194,7 +194,7 @@ Troubleshooting guides:
 - `docs/agents/opencode.md`
 - `docs/agents/troubleshooting.md`
 
-Install Codex skill pack (optional):
+Install skill pack for agents (optional):
 
 ```bash
 demongrep add-skills

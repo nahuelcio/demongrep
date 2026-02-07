@@ -11,7 +11,7 @@ pub fn run(skill: String, ref_name: Option<String>, dest: Option<PathBuf>) -> Re
     ensure_command("tar")?;
 
     let ref_name = ref_name.unwrap_or_else(|| format!("v{}", env!("CARGO_PKG_VERSION")));
-    let skills_root = resolve_skills_dir(dest)?;
+    let destinations = resolve_destinations(dest)?;
     let temp_root = create_temp_root()?;
 
     let tarball = temp_root.join("repo.tar.gz");
@@ -24,22 +24,28 @@ pub fn run(skill: String, ref_name: Option<String>, dest: Option<PathBuf>) -> Re
         return Err(anyhow!("Skill '{}' not found in ref '{}'", skill, ref_name));
     }
 
-    fs::create_dir_all(&skills_root)
-        .with_context(|| format!("Failed to create {}", skills_root.display()))?;
+    let mut installed_paths = Vec::new();
+    for skills_root in destinations {
+        fs::create_dir_all(&skills_root)
+            .with_context(|| format!("Failed to create {}", skills_root.display()))?;
 
-    let skill_dest = skills_root.join(&skill);
-    if skill_dest.exists() {
-        fs::remove_dir_all(&skill_dest)
-            .with_context(|| format!("Failed to remove existing {}", skill_dest.display()))?;
+        let skill_dest = skills_root.join(&skill);
+        if skill_dest.exists() {
+            fs::remove_dir_all(&skill_dest)
+                .with_context(|| format!("Failed to remove existing {}", skill_dest.display()))?;
+        }
+
+        copy_dir_recursive(&skill_src, &skill_dest)?;
+        installed_paths.push(skill_dest);
     }
-
-    copy_dir_recursive(&skill_src, &skill_dest)?;
 
     let _ = fs::remove_dir_all(&temp_root);
 
     println!("Installed skill: {}", skill);
-    println!("Destination: {}", skill_dest.display());
-    println!("Restart Codex to pick up new skills.");
+    for path in installed_paths {
+        println!("Destination: {}", path.display());
+    }
+    println!("Restart your agent(s) to pick up new skills.");
     Ok(())
 }
 
@@ -57,15 +63,18 @@ fn ensure_command(cmd: &str) -> Result<()> {
     Ok(())
 }
 
-fn resolve_skills_dir(dest: Option<PathBuf>) -> Result<PathBuf> {
-    match dest {
-        Some(d) => Ok(d),
-        None => {
-            let home =
-                dirs::home_dir().ok_or_else(|| anyhow!("Could not determine home directory"))?;
-            Ok(home.join(".codex").join("skills"))
-        }
+fn resolve_destinations(dest: Option<PathBuf>) -> Result<Vec<PathBuf>> {
+    if let Some(d) = dest {
+        return Ok(vec![d]);
     }
+
+    let cwd = std::env::current_dir().context("Failed to determine current directory")?;
+    let home = dirs::home_dir().ok_or_else(|| anyhow!("Could not determine home directory"))?;
+
+    Ok(vec![
+        cwd.join(".agents").join("skills"),
+        home.join(".agents").join("skills"),
+    ])
 }
 
 fn create_temp_root() -> Result<PathBuf> {

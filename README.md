@@ -493,7 +493,9 @@ demongrep install-opencode [--project-path PATH] [--dry-run]
 
 ### add-skills
 
-Install demongrep Codex skills into `~/.codex/skills`.
+Install demongrep skills into:
+- `./.agents/skills`
+- `~/.agents/skills`
 
 ```bash
 demongrep add-skills
@@ -503,7 +505,7 @@ Optional:
 
 ```bash
 demongrep add-skills --ref v0.1.4
-demongrep add-skills --dest ~/.codex/skills
+demongrep add-skills --dest ~/.agents/skills
 ```
 
 ---

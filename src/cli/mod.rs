@@ -208,7 +208,7 @@ pub enum Commands {
         dry_run: bool,
     },
 
-    /// Install demongrep coding-agent skills into Codex
+    /// Install demongrep coding-agent skills into .agents skill folders
     AddSkills {
         /// Skill name to install
         #[arg(long, default_value = "demongrep-agent-workflows")]
