@@ -1,7 +1,7 @@
 use anyhow::Result;
 use colored::Colorize;
 use serde::Serialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::cache::FileMetaStore;
@@ -9,7 +9,7 @@ use crate::chunker::SemanticChunker;
 use crate::embed::{EmbeddingService, ModelType};
 use crate::file::FileWalker;
 use crate::fts::FtsStore;
-use crate::index::get_search_db_paths;
+use crate::index::get_local_search_db_path;
 use crate::rerank::{rrf_fusion, vector_only, FusedResult, NeuralReranker};
 use crate::vectordb::VectorStore;
 
@@ -62,7 +62,23 @@ fn read_metadata(db_path: &PathBuf) -> Option<(String, usize)> {
     None
 }
 
-/// Search the codebase (searches both local and global databases)
+/// Normalize a stored result path to an absolute canonical path when possible.
+fn normalize_result_path(path: &str, project_root: &Path) -> String {
+    let pb = PathBuf::from(path);
+    let absolute = if pb.is_absolute() {
+        pb
+    } else {
+        project_root.join(pb)
+    };
+
+    absolute
+        .canonicalize()
+        .unwrap_or(absolute)
+        .to_string_lossy()
+        .to_string()
+}
+
+/// Search the codebase (local database only)
 #[allow(clippy::too_many_arguments)]
 pub async fn search(
     query: &str,
@@ -83,32 +99,18 @@ pub async fn search(
     rerank_top: usize,
     kind_filter: Option<String>,
 ) -> Result<()> {
-    // Get all database paths (local + global)
-    let db_paths = get_search_db_paths(path.clone())?;
+    // Use local project database only
+    let db_path = get_local_search_db_path(path.clone())?;
+    let project_root = path
+        .clone()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .canonicalize()?;
 
-    if db_paths.is_empty() {
+    let Some(db_path) = db_path else {
         println!("{}", "❌ No database found!".red());
-        println!(
-            "   Run {} or {} first",
-            "demongrep index".bright_cyan(),
-            "demongrep index --global".bright_cyan()
-        );
+        println!("   Run {} first", "demongrep index".bright_cyan());
         return Ok(());
-    }
-
-    // Show which databases we're searching (unless in JSON mode)
-    if !json && db_paths.len() > 1 {
-        println!("{}", "🔍 Searching in multiple databases...".dimmed());
-        for db_path in &db_paths {
-            let db_type = if db_path.ends_with(".demongrep.db") {
-                "Local"
-            } else {
-                "Global"
-            };
-            println!("   {} {}", db_type, db_path.display().to_string().dimmed());
-        }
-        println!();
-    }
+    };
 
     // Collect all results from all databases
     let mut all_results: Vec<crate::vectordb::SearchResult> = Vec::new();
@@ -120,7 +122,7 @@ pub async fn search(
     // We'll use the first database's model/dimensions, or override
     let (model_type, dimensions) = if let Some(override_model) = model_override {
         (override_model, override_model.dimensions())
-    } else if let Some((model_name, dims)) = read_metadata(&db_paths[0]) {
+    } else if let Some((model_name, dims)) = read_metadata(&db_path) {
         if let Some(mt) = ModelType::from_str(&model_name) {
             (mt, dims)
         } else {
@@ -137,7 +139,7 @@ pub async fn search(
     // Initialize embedding service once (shared across all databases)
     // Use persistent disk cache for faster re-indexing
     let start = Instant::now();
-    let mut embedding_service = EmbeddingService::with_model_and_db(model_type, &db_paths[0])?;
+    let mut embedding_service = EmbeddingService::with_model_and_db(model_type, &db_path)?;
     model_load_duration = start.elapsed();
 
     // Embed query once
@@ -145,98 +147,90 @@ pub async fn search(
     let query_embedding = embedding_service.embed_query(query)?;
     total_embed_duration = start.elapsed();
 
-    // Search in each database
-    for db_path in db_paths {
-        // Perform sync if requested
-        if sync {
-            if !json {
-                let db_type: &str = if db_path.ends_with(".demongrep.db") {
-                    "Local"
-                } else {
-                    "Global"
-                };
-                println!("{}", format!("🔄 Syncing {} database...", db_type).yellow());
-            }
-            sync_database(&db_path, model_type)?;
+    // Perform sync if requested
+    if sync {
+        if !json {
+            println!("{}", "🔄 Syncing local database...".yellow());
         }
-
-        // Load this database
-        let start = Instant::now();
-        let mut store = VectorStore::new(&db_path, dimensions)?;
-        let stats = store.stats()?;
-        if stats.total_chunks == 0 {
-            continue;
-        }
-        if !stats.indexed {
-            if !json {
-                println!(
-                    "{}",
-                    "⚠️  Vector index missing, rebuilding automatically...".yellow()
-                );
-            }
-            store.build_index()?;
-        }
-        total_load_duration += start.elapsed();
-
-        // Search in this database
-        let start = Instant::now();
-        let retrieval_limit = if vector_only_mode { max_results } else { 200 };
-        let vector_results = store.search(&query_embedding, retrieval_limit)?;
-
-        let fused_results: Vec<FusedResult> = if vector_only_mode {
-            vector_only(&vector_results)
-        } else {
-            match FtsStore::open_readonly(&db_path) {
-                Ok(fts_store) => {
-                    let fts_results = fts_store.search(query, retrieval_limit)?;
-                    rrf_fusion(&vector_results, &fts_results, rrf_k)
-                }
-                Err(_) => {
-                    if !json {
-                        eprintln!(
-                            "{}",
-                            "⚠️  FTS index not found, using vector-only search".yellow()
-                        );
-                    }
-                    vector_only(&vector_results)
-                }
-            }
-        };
-
-        // Map fused results back to full SearchResult
-        let chunk_id_to_result: std::collections::HashMap<u32, &crate::vectordb::SearchResult> =
-            vector_results.iter().map(|r| (r.id, r)).collect();
-
-        let requested_count = max_results.saturating_add(offset);
-        let take_count = if rerank {
-            rerank_top.max(requested_count).min(fused_results.len())
-        } else {
-            requested_count.min(fused_results.len())
-        };
-
-        for fused in fused_results.iter().take(take_count) {
-            if let Some(result) = chunk_id_to_result.get(&fused.chunk_id) {
-                let mut r = (*result).clone();
-                r.score = fused.rrf_score;
-                all_results.push(r);
-            } else {
-                if let Ok(Some(mut result)) = store.get_chunk_as_result(fused.chunk_id) {
-                    result.score = fused.rrf_score;
-                    all_results.push(result);
-                }
-            }
-        }
-
-        total_search_duration += start.elapsed();
+        sync_database(&db_path, model_type)?;
     }
+
+    // Load local database
+    let start = Instant::now();
+    let mut store = VectorStore::new(&db_path, dimensions)?;
+    let stats = store.stats()?;
+    if stats.total_chunks == 0 {
+        return Ok(());
+    }
+    if !stats.indexed {
+        if !json {
+            println!(
+                "{}",
+                "⚠️  Vector index missing, rebuilding automatically...".yellow()
+            );
+        }
+        store.build_index()?;
+    }
+    total_load_duration += start.elapsed();
+
+    // Search local database
+    let start = Instant::now();
+    let retrieval_limit = if vector_only_mode { max_results } else { 200 };
+    let vector_results = store.search(&query_embedding, retrieval_limit)?;
+
+    let fused_results: Vec<FusedResult> = if vector_only_mode {
+        vector_only(&vector_results)
+    } else {
+        match FtsStore::open_readonly(&db_path) {
+            Ok(fts_store) => {
+                let fts_results = fts_store.search(query, retrieval_limit)?;
+                rrf_fusion(&vector_results, &fts_results, rrf_k)
+            }
+            Err(_) => {
+                if !json {
+                    eprintln!(
+                        "{}",
+                        "⚠️  FTS index not found, using vector-only search".yellow()
+                    );
+                }
+                vector_only(&vector_results)
+            }
+        }
+    };
+
+    // Map fused results back to full SearchResult
+    let chunk_id_to_result: std::collections::HashMap<u32, &crate::vectordb::SearchResult> =
+        vector_results.iter().map(|r| (r.id, r)).collect();
+
+    let requested_count = max_results.saturating_add(offset);
+    let take_count = if rerank {
+        rerank_top.max(requested_count).min(fused_results.len())
+    } else {
+        requested_count.min(fused_results.len())
+    };
+
+    for fused in fused_results.iter().take(take_count) {
+        if let Some(result) = chunk_id_to_result.get(&fused.chunk_id) {
+            let mut r = (*result).clone();
+            r.score = fused.rrf_score;
+            all_results.push(r);
+        } else if let Ok(Some(mut result)) = store.get_chunk_as_result(fused.chunk_id) {
+            result.score = fused.rrf_score;
+            all_results.push(result);
+        }
+    }
+
+    total_search_duration += start.elapsed();
 
     // Deduplicate results by (path, start_line, end_line) and keep highest score
     let mut seen: std::collections::HashMap<(String, usize, usize), usize> =
         std::collections::HashMap::new();
     let mut results: Vec<crate::vectordb::SearchResult> = Vec::new();
 
-    for result in all_results {
-        let key = (result.path.clone(), result.start_line, result.end_line);
+    for mut result in all_results {
+        let normalized_path = normalize_result_path(&result.path, &project_root);
+        result.path = normalized_path.clone();
+        let key = (normalized_path, result.start_line, result.end_line);
         if let Some(&idx) = seen.get(&key) {
             // Already have this result, keep the one with higher score
             if result.score > results[idx].score {

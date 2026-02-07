@@ -74,6 +74,19 @@ pub fn get_search_db_paths(path: Option<PathBuf>) -> Result<Vec<PathBuf>> {
     Ok(paths)
 }
 
+/// Get only the local database path for search (project/.demongrep.db)
+pub fn get_local_search_db_path(path: Option<PathBuf>) -> Result<Option<PathBuf>> {
+    let project_path = path.unwrap_or_else(|| PathBuf::from("."));
+    let canonical_path = project_path.canonicalize()?;
+    let local_db = canonical_path.join(".demongrep.db");
+
+    if local_db.exists() {
+        Ok(Some(local_db))
+    } else {
+        Ok(None)
+    }
+}
+
 /// Save project -> database mapping
 fn save_project_mapping(project_path: &Path, db_path: &Path) -> Result<()> {
     let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
