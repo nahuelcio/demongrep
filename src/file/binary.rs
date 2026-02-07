@@ -179,7 +179,7 @@ mod tests {
 
     #[test]
     fn test_printable_or_whitespace() {
-        assert!(is_printable_or_whitespace(b' '));  // space
+        assert!(is_printable_or_whitespace(b' ')); // space
         assert!(is_printable_or_whitespace(b'\t')); // tab
         assert!(is_printable_or_whitespace(b'\n')); // newline
         assert!(is_printable_or_whitespace(b'\r')); // carriage return

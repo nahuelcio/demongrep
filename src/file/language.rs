@@ -30,10 +30,7 @@ pub enum Language {
 impl Language {
     /// Detect language from file extension
     pub fn from_path(path: &Path) -> Self {
-        let extension = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
         Self::from_extension(extension)
     }

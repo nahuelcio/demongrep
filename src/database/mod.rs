@@ -98,8 +98,8 @@ impl DatabaseManager {
         }
 
         // Read metadata from first database
-        let (model_type, dimensions) = Self::read_metadata(&db_paths[0])
-            .unwrap_or_else(|| (ModelType::default(), 384));
+        let (model_type, dimensions) =
+            Self::read_metadata(&db_paths[0]).unwrap_or_else(|| (ModelType::default(), 384));
 
         // Load all databases
         let mut databases = Vec::new();
@@ -156,22 +156,30 @@ impl DatabaseManager {
 
     /// Check if a local database exists
     pub fn has_local(&self) -> bool {
-        self.databases.iter().any(|db| db.db_type == DatabaseType::Local)
+        self.databases
+            .iter()
+            .any(|db| db.db_type == DatabaseType::Local)
     }
 
     /// Check if a global database exists
     pub fn has_global(&self) -> bool {
-        self.databases.iter().any(|db| db.db_type == DatabaseType::Global)
+        self.databases
+            .iter()
+            .any(|db| db.db_type == DatabaseType::Global)
     }
 
     /// Get local database if it exists
     pub fn local_database(&self) -> Option<&Database> {
-        self.databases.iter().find(|db| db.db_type == DatabaseType::Local)
+        self.databases
+            .iter()
+            .find(|db| db.db_type == DatabaseType::Local)
     }
 
     /// Get local database mutably if it exists
     pub fn local_database_mut(&mut self) -> Option<&mut Database> {
-        self.databases.iter_mut().find(|db| db.db_type == DatabaseType::Local)
+        self.databases
+            .iter_mut()
+            .find(|db| db.db_type == DatabaseType::Local)
     }
 
     /// Get all databases
@@ -185,11 +193,17 @@ impl DatabaseManager {
     }
 
     /// Search across all databases
-    pub fn search_all(&self, query_embedding: &[f32], limit: usize) -> Result<Vec<SearchResult>> {
+    pub fn search_all(
+        &self,
+        query_embedding: &[f32],
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<SearchResult>> {
         let mut all_results = Vec::new();
+        let retrieval_limit = limit.saturating_add(offset);
 
         for database in &self.databases {
-            match database.store.search(query_embedding, limit) {
+            match database.store.search(query_embedding, retrieval_limit) {
                 Ok(mut results) => {
                     all_results.append(&mut results);
                 }
@@ -204,10 +218,15 @@ impl DatabaseManager {
         }
 
         // Sort by score descending
-        all_results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
-        
-        // Limit total results
-        all_results.truncate(limit);
+        all_results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Apply pagination
+        let all_results: Vec<SearchResult> =
+            all_results.into_iter().skip(offset).take(limit).collect();
 
         Ok(all_results)
     }
@@ -218,6 +237,7 @@ impl DatabaseManager {
         query: &str,
         query_embedding: &[f32],
         limit: usize,
+        offset: usize,
         rrf_k: f32,
     ) -> Result<Vec<SearchResult>> {
         let mut all_results: Vec<SearchResult> = Vec::new();
@@ -251,12 +271,15 @@ impl DatabaseManager {
             let chunk_id_to_result: std::collections::HashMap<u32, &SearchResult> =
                 vector_results.iter().map(|r| (r.id, r)).collect();
 
-            for fused in fused_results.iter().take(limit) {
+            let retrieval_limit = limit.saturating_add(offset);
+            for fused in fused_results.iter().take(retrieval_limit) {
                 if let Some(result) = chunk_id_to_result.get(&fused.chunk_id) {
                     let mut r = (*result).clone();
                     r.score = fused.rrf_score;
                     all_results.push(r);
-                } else if let Ok(Some(mut result)) = database.store.get_chunk_as_result(fused.chunk_id) {
+                } else if let Ok(Some(mut result)) =
+                    database.store.get_chunk_as_result(fused.chunk_id)
+                {
                     result.score = fused.rrf_score;
                     all_results.push(result);
                 }
@@ -280,9 +303,13 @@ impl DatabaseManager {
             }
         }
 
-        // Sort by score descending and truncate
-        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
-        results.truncate(limit);
+        // Sort by score descending and apply pagination
+        results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let results: Vec<SearchResult> = results.into_iter().skip(offset).take(limit).collect();
 
         Ok(results)
     }
@@ -317,7 +344,7 @@ impl DatabaseManager {
     /// Read metadata from a database
     fn read_metadata(db_path: &PathBuf) -> Option<(ModelType, usize)> {
         let metadata_path = db_path.join("metadata.json");
-        
+
         if !metadata_path.exists() {
             return None;
         }
@@ -395,12 +422,13 @@ impl DatabaseManagerBuilder {
         }
 
         // Determine model and dimensions
-        let (model_type, dimensions) = if let (Some(mt), Some(dims)) = (self.model_type, self.dimensions) {
-            (mt, dims)
-        } else {
-            DatabaseManager::read_metadata(&self.db_paths[0])
-                .unwrap_or_else(|| (ModelType::default(), 384))
-        };
+        let (model_type, dimensions) =
+            if let (Some(mt), Some(dims)) = (self.model_type, self.dimensions) {
+                (mt, dims)
+            } else {
+                DatabaseManager::read_metadata(&self.db_paths[0])
+                    .unwrap_or_else(|| (ModelType::default(), 384))
+            };
 
         // Load all databases
         let mut databases = Vec::new();

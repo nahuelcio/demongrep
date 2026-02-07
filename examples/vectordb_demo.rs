@@ -7,13 +7,10 @@
 /// 5. Search and retrieval
 ///
 /// Run with: cargo run --example vectordb_demo
-
 use anyhow::Result;
 use colored::Colorize;
-use demongrep::{
-    ChunkKind, EmbeddingService, FileWalker, Language, VectorStore,
-};
 use demongrep::chunker::SemanticChunker;
+use demongrep::{ChunkKind, EmbeddingService, FileWalker, Language, VectorStore};
 use std::path::Path;
 use std::time::Instant;
 
@@ -126,11 +123,7 @@ async fn main() -> Result<()> {
     }
 
     let duration = start.elapsed();
-    println!(
-        "\n✅ Created {} chunks in {:?}",
-        all_chunks.len(),
-        duration
-    );
+    println!("\n✅ Created {} chunks in {:?}", all_chunks.len(), duration);
 
     // Show example chunk
     if let Some(chunk) = all_chunks.first() {
@@ -166,12 +159,22 @@ async fn main() -> Result<()> {
         embedding_service.dimensions()
     );
 
-    println!("\n🔄 Generating embeddings for {} chunks...", all_chunks.len());
+    println!(
+        "\n🔄 Generating embeddings for {} chunks...",
+        all_chunks.len()
+    );
     let embedded_chunks = embedding_service.embed_chunks(all_chunks)?;
     let duration = start.elapsed();
 
-    println!("✅ Generated {} embeddings in {:?}", embedded_chunks.len(), duration);
-    println!("   Average: {:?} per chunk", duration / embedded_chunks.len() as u32);
+    println!(
+        "✅ Generated {} embeddings in {:?}",
+        embedded_chunks.len(),
+        duration
+    );
+    println!(
+        "   Average: {:?} per chunk",
+        duration / embedded_chunks.len() as u32
+    );
 
     // Show cache stats
     let cache_stats = embedding_service.cache_stats();
@@ -293,8 +296,15 @@ async fn main() -> Result<()> {
     println!("   1. File discovery: {} files", files_to_process.len());
     println!("   2. Semantic chunking: {} chunks", count);
     println!("   3. Embedding generation: {} embeddings", count);
-    println!("   4. Vector storage: single {} directory", db_path.display());
-    println!("   5. Search: {} results in {:?}", results.len(), search_duration);
+    println!(
+        "   4. Vector storage: single {} directory",
+        db_path.display()
+    );
+    println!(
+        "   5. Search: {} results in {:?}",
+        results.len(),
+        search_duration
+    );
 
     println!("\n💾 Database persisted at: {}", db_path.display());
     println!("   You can now use this database for subsequent searches!");

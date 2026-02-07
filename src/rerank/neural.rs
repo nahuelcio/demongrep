@@ -65,17 +65,12 @@ impl NeuralReranker {
 
         // Rerank using the cross-encoder
         let results = self.reranker.rerank(
-            query,
-            doc_refs,
-            false, // Don't return documents (we have them)
+            query, doc_refs, false, // Don't return documents (we have them)
             None,  // Use default batch size
         )?;
 
         // Convert to (index, score) pairs
-        Ok(results
-            .into_iter()
-            .map(|r| (r.index, r.score))
-            .collect())
+        Ok(results.into_iter().map(|r| (r.index, r.score)).collect())
     }
 
     /// Rerank and blend scores with existing RRF scores
@@ -162,7 +157,8 @@ mod tests {
         let documents = vec![
             "fn authenticate(user: &str, password: &str) -> bool { ... }".to_string(),
             "fn calculate_sum(a: i32, b: i32) -> i32 { a + b }".to_string(),
-            "impl UserAuth for App { fn login(&self, credentials: Credentials) -> Result<Token> }".to_string(),
+            "impl UserAuth for App { fn login(&self, credentials: Credentials) -> Result<Token> }"
+                .to_string(),
         ];
 
         let results = reranker.rerank(query, &documents).unwrap();

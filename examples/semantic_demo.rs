@@ -93,8 +93,17 @@ const MAX_SIZE: usize = 100;
                     println!("  Docstring: {}", doc.lines().next().unwrap_or(""));
                 }
 
-                println!("  Content preview: {}...",
-                    chunk.content.lines().next().unwrap_or("").chars().take(60).collect::<String>());
+                println!(
+                    "  Content preview: {}...",
+                    chunk
+                        .content
+                        .lines()
+                        .next()
+                        .unwrap_or("")
+                        .chars()
+                        .take(60)
+                        .collect::<String>()
+                );
                 println!();
             }
         }
@@ -260,7 +269,8 @@ enum Status {
                 }
 
                 if let Some(doc) = &chunk.docstring {
-                    let first_line = doc.lines()
+                    let first_line = doc
+                        .lines()
                         .find(|l| !l.trim().is_empty() && !l.trim().starts_with('*'))
                         .unwrap_or("");
                     println!("  JSDoc: {}", first_line.trim());

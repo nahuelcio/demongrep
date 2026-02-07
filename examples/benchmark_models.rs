@@ -25,7 +25,10 @@ const TEST_QUERIES: &[(&str, &str)] = &[
     ("where is the main entry point", "src/main.rs"),
     ("CLI argument parsing clap", "src/cli/mod.rs"),
     ("FileWalker walk directory", "file_walker"),
-    ("RustExtractor python typescript", "src/chunker/extractor.rs"),
+    (
+        "RustExtractor python typescript",
+        "src/chunker/extractor.rs",
+    ),
 ];
 
 /// False positive test (should have low score)
@@ -51,9 +54,7 @@ fn main() -> Result<()> {
 
     // Models to benchmark - Batch 4: ModernBERT (final model)
     // All others tested successfully
-    let models_to_test = vec![
-        ModelType::ModernBertEmbedLarge,
-    ];
+    let models_to_test = vec![ModelType::ModernBertEmbedLarge];
 
     println!("📋 Models to benchmark: {}", models_to_test.len());
     for model in &models_to_test {
@@ -172,7 +173,11 @@ fn benchmark_model(model_type: ModelType, chunks: &[Chunk]) -> Result<BenchmarkR
             "   {} \"{}\" -> {} (score: {:.3})",
             if is_correct { "✅" } else { "❌" },
             &query[..query.len().min(30)],
-            best_chunk.path.split('/').last().unwrap_or(&best_chunk.path),
+            best_chunk
+                .path
+                .split('/')
+                .last()
+                .unwrap_or(&best_chunk.path),
             best_score
         );
     }
@@ -193,8 +198,7 @@ fn benchmark_model(model_type: ModelType, chunks: &[Chunk]) -> Result<BenchmarkR
 
     let accuracy = correct as f32 / TEST_QUERIES.len() as f32;
     let avg_score = total_score / TEST_QUERIES.len() as f32;
-    let avg_query_time =
-        query_times.iter().sum::<Duration>() / query_times.len().max(1) as u32;
+    let avg_query_time = query_times.iter().sum::<Duration>() / query_times.len().max(1) as u32;
 
     Ok(BenchmarkResult {
         model: model_type,

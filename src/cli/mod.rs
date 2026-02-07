@@ -39,6 +39,10 @@ pub enum Commands {
         /// Search query (e.g., "where do we handle authentication?")
         query: String,
 
+        /// Offset for pagination (skip first N results)
+        #[arg(long, default_value = "0")]
+        offset: usize,
+
         /// Maximum total results to return
         #[arg(short = 'm', long, default_value = "25")]
         max_results: usize,
@@ -204,6 +208,7 @@ pub async fn run() -> Result<()> {
     match cli.command {
         Commands::Search {
             query,
+            offset,
             max_results,
             per_file,
             content,
@@ -234,6 +239,7 @@ pub async fn run() -> Result<()> {
             }
             crate::search::search(
                 &query,
+                offset,
                 max_results,
                 per_file,
                 content,
@@ -262,17 +268,17 @@ pub async fn run() -> Result<()> {
         Commands::List => crate::index::list().await,
         Commands::Stats { path } => crate::index::stats(path).await,
         Commands::Clear { path, yes, project } => crate::index::clear(path, yes, project).await,
-         Commands::Doctor => crate::cli::doctor::run().await,
-         Commands::Setup { model } => crate::cli::setup::run(model).await,
-         Commands::Mcp { path } => crate::mcp::run_mcp_server(path).await,
-         Commands::InstallClaudeCode { global } => crate::cli::install_claude_code::run(global),
-         Commands::InstallCodex => crate::cli::install_codex::run(),
-         Commands::InstallOpencode => crate::cli::install_opencode::run(),
-     }
- }
+        Commands::Doctor => crate::cli::doctor::run().await,
+        Commands::Setup { model } => crate::cli::setup::run(model).await,
+        Commands::Mcp { path } => crate::mcp::run_mcp_server(path).await,
+        Commands::InstallClaudeCode { global } => crate::cli::install_claude_code::run(global),
+        Commands::InstallCodex => crate::cli::install_codex::run(),
+        Commands::InstallOpencode => crate::cli::install_opencode::run(),
+    }
+}
 
- mod doctor;
- mod setup;
- mod install_claude_code;
- mod install_codex;
- mod install_opencode;
+mod doctor;
+mod install_claude_code;
+mod install_codex;
+mod install_opencode;
+mod setup;

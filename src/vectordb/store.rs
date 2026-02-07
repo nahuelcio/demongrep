@@ -201,7 +201,8 @@ impl VectorStore {
         // Mark as not indexed (need to rebuild index after inserts)
         self.indexed = false;
 
-        println!("✅ Inserted {} chunks (IDs: {}-{})",
+        println!(
+            "✅ Inserted {} chunks (IDs: {}-{})",
             chunks.len(),
             self.next_id - chunks.len() as u32,
             self.next_id - 1
@@ -506,7 +507,7 @@ pub struct StoreStats {
 
 impl VectorStore {
     // ========== File Metadata Methods for Incremental Indexing ==========
-    
+
     /// Compute SHA256 hash of file content
     fn compute_file_hash(path: &Path) -> Result<String> {
         let content = std::fs::read(path)?;
@@ -526,13 +527,13 @@ impl VectorStore {
     /// Returns: (needs_reindex, existing_chunk_ids_to_delete)
     pub fn check_file_needs_reindex(&self, path: &Path) -> Result<(bool, Vec<u32>)> {
         let path_str = path.to_string_lossy().to_string();
-        
+
         // Get current file stats
         let current_mtime = Self::get_file_mtime(path)?;
         let current_size = std::fs::metadata(path)?.len();
 
         let rtxn = self.env.read_txn()?;
-        
+
         if let Some(meta) = self.file_metadata.get(&rtxn, &path_str)? {
             // Quick check: if mtime and size unchanged, file is unchanged
             if meta.mtime == current_mtime && meta.size == current_size {
@@ -580,11 +581,13 @@ impl VectorStore {
     /// Returns the chunk IDs that were associated with the file
     pub fn remove_file_metadata(&mut self, path: &Path) -> Result<Option<Vec<u32>>> {
         let path_str = path.to_string_lossy().to_string();
-        
+
         let mut wtxn = self.env.write_txn()?;
-        let chunk_ids = self.file_metadata.get(&wtxn, &path_str)?
+        let chunk_ids = self
+            .file_metadata
+            .get(&wtxn, &path_str)?
             .map(|meta| meta.chunk_ids.clone());
-        
+
         self.file_metadata.delete(&mut wtxn, &path_str)?;
         wtxn.commit()?;
 
@@ -610,7 +613,7 @@ impl VectorStore {
     /// Get or initialize database metadata
     pub fn get_db_metadata(&self, model_name: &str, dimensions: usize) -> Result<DbMetadata> {
         let rtxn = self.env.read_txn()?;
-        
+
         if let Some(meta) = self.db_metadata.get(&rtxn, "metadata")? {
             // Check if model changed
             if meta.model_name != model_name || meta.dimensions != dimensions {
@@ -636,7 +639,12 @@ impl VectorStore {
     }
 
     /// Save database metadata
-    pub fn save_db_metadata(&mut self, model_name: &str, dimensions: usize, mark_full_index: bool) -> Result<()> {
+    pub fn save_db_metadata(
+        &mut self,
+        model_name: &str,
+        dimensions: usize,
+        mark_full_index: bool,
+    ) -> Result<()> {
         let mut meta = DbMetadata {
             model_name: model_name.to_string(),
             dimensions,
@@ -648,7 +656,7 @@ impl VectorStore {
             meta.last_full_index = Some(
                 SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)?
-                    .as_secs()
+                    .as_secs(),
             );
         }
 

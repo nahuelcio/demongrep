@@ -1,0 +1,2 @@
+bge-small-q             |     142.50s |    N/A | N/A |         
+minilm-l12-q            |      97.19s |    N/A | N/A |         

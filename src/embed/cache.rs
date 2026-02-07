@@ -106,22 +106,36 @@ impl CacheStats {
     }
 }
 
-/// Cached batch embedder that uses an embedding cache
+/// Cached batch embedder with L1 in-memory + optional L2 persistent disk cache
 pub struct CachedBatchEmbedder {
     pub batch_embedder: super::batch::BatchEmbedder,
     cache: EmbeddingCache,
+    persistent_cache: Option<super::persistent_cache::PersistentEmbeddingCache>,
 }
 
 impl CachedBatchEmbedder {
-    /// Create a new cached batch embedder
+    /// Create a new cached batch embedder (in-memory cache only)
     pub fn new(batch_embedder: super::batch::BatchEmbedder) -> Self {
         Self {
             batch_embedder,
             cache: EmbeddingCache::new(),
+            persistent_cache: None,
         }
     }
 
-    /// Embed chunks using cache when possible
+    /// Create with persistent disk cache (L1 in-memory + L2 LMDB)
+    pub fn with_persistent_cache(
+        batch_embedder: super::batch::BatchEmbedder,
+        persistent_cache: super::persistent_cache::PersistentEmbeddingCache,
+    ) -> Self {
+        Self {
+            batch_embedder,
+            cache: EmbeddingCache::new(),
+            persistent_cache: Some(persistent_cache),
+        }
+    }
+
+    /// Embed chunks using cache when possible (L1 -> L2 -> compute)
     pub fn embed_chunks(&mut self, chunks: Vec<Chunk>) -> Result<Vec<EmbeddedChunk>> {
         if chunks.is_empty() {
             return Ok(Vec::new());
@@ -130,45 +144,65 @@ impl CachedBatchEmbedder {
         let total = chunks.len();
         let mut embedded_chunks = Vec::with_capacity(total);
         let mut chunks_to_embed = Vec::new();
-        let mut cache_indices = Vec::new();
+        let mut l1_hits = 0usize;
+        let mut l2_hits = 0usize;
 
-        // Check cache first
-        println!("🔍 Checking cache for {} chunks...", total);
-        for (idx, chunk) in chunks.iter().enumerate() {
+        // Check L1 (in-memory) then L2 (persistent) cache
+        for chunk in chunks.iter() {
             if let Some(embedding) = self.cache.get(chunk) {
+                // L1 hit
                 embedded_chunks.push(EmbeddedChunk::new(chunk.clone(), embedding));
+                l1_hits += 1;
+            } else if let Some(embedding) = self
+                .persistent_cache
+                .as_ref()
+                .and_then(|pc| pc.get(&chunk.hash))
+            {
+                // L2 hit - promote to L1
+                self.cache.put(chunk, embedding.clone());
+                embedded_chunks.push(EmbeddedChunk::new(chunk.clone(), embedding));
+                l2_hits += 1;
             } else {
                 chunks_to_embed.push(chunk.clone());
-                cache_indices.push(idx);
             }
         }
 
-        let cached_count = embedded_chunks.len();
         let to_embed_count = chunks_to_embed.len();
 
-        println!(
-            "   ✅ Found {} in cache, embedding {} new chunks",
-            cached_count, to_embed_count
+        crate::info_print!(
+            "🔍 Cache: {} L1 hits, {} L2 hits, {} to embed (of {})",
+            l1_hits,
+            l2_hits,
+            to_embed_count,
+            total
         );
 
         // Embed remaining chunks
         if !chunks_to_embed.is_empty() {
             let newly_embedded = self.batch_embedder.embed_chunks(chunks_to_embed)?;
 
-            // Store in cache
+            // Store in L1 cache
             for embedded in &newly_embedded {
                 self.cache.put_embedded(embedded);
+            }
+
+            // Batch-store in L2 persistent cache
+            if let Some(ref pc) = self.persistent_cache {
+                let items: Vec<(&str, &[f32])> = newly_embedded
+                    .iter()
+                    .map(|e| (e.chunk.hash.as_str(), e.embedding.as_slice()))
+                    .collect();
+                if let Err(e) = pc.put_batch(&items) {
+                    eprintln!("Warning: Failed to write to persistent cache: {}", e);
+                }
             }
 
             embedded_chunks.extend(newly_embedded);
         }
 
-        // Sort by original order if needed
-        // (Note: Current implementation maintains order naturally due to how we build the vec)
-
         let stats = self.cache.stats();
-        println!(
-            "📊 Cache stats: {} entries, {:.1}% hit rate",
+        crate::info_print!(
+            "📊 Cache stats: {} L1 entries, {:.1}% hit rate",
             stats.size,
             stats.hit_rate() * 100.0
         );
@@ -178,12 +212,28 @@ impl CachedBatchEmbedder {
 
     /// Embed a single chunk with caching
     pub fn embed_chunk(&mut self, chunk: Chunk) -> Result<EmbeddedChunk> {
+        // L1 check
         if let Some(embedding) = self.cache.get(&chunk) {
             return Ok(EmbeddedChunk::new(chunk, embedding));
         }
 
+        // L2 check
+        if let Some(embedding) = self
+            .persistent_cache
+            .as_ref()
+            .and_then(|pc| pc.get(&chunk.hash))
+        {
+            self.cache.put(&chunk, embedding.clone());
+            return Ok(EmbeddedChunk::new(chunk, embedding));
+        }
+
+        // Compute
         let embedded = self.batch_embedder.embed_chunk(chunk)?;
         self.cache.put_embedded(&embedded);
+
+        if let Some(ref pc) = self.persistent_cache {
+            let _ = pc.put(&embedded.chunk.hash, &embedded.embedding);
+        }
 
         Ok(embedded)
     }
@@ -193,7 +243,7 @@ impl CachedBatchEmbedder {
         self.cache.stats()
     }
 
-    /// Clear the cache
+    /// Clear the in-memory cache
     pub fn clear_cache(&self) {
         self.cache.clear();
     }

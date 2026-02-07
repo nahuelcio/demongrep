@@ -1,0 +1,23 @@
+,
+{
+  "model": "bge-small-q",
+  "dimensions": 384
+384,
+  "chunks": 1105,
+  "index_time_ms": 162988,
+  "db_size_mb": 0.06,
+  "accuracy": 0,
+  "correct_queries": 0,
+  "total_queries": 8,
+  "avg_query_time_ms": .422,
+  "query_results": [
+,
+,
+,
+,
+,
+,
+,
+
+  ]
+}

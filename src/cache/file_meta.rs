@@ -67,8 +67,10 @@ impl FileMetaStore {
 
             // Check if model changed - if so, invalidate everything
             if store.model_name != model_name || store.dimensions != dimensions {
-                println!("⚠️  Model changed ({} -> {}), full re-index required",
-                    store.model_name, model_name);
+                println!(
+                    "⚠️  Model changed ({} -> {}), full re-index required",
+                    store.model_name, model_name
+                );
                 store = Self::new(model_name.to_string(), dimensions);
             }
 
@@ -138,13 +140,16 @@ impl FileMetaStore {
         let mtime = Self::get_mtime(path)?;
         let size = fs::metadata(path)?.len();
 
-        self.files.insert(path_str, FileMeta {
-            hash,
-            mtime,
-            size,
-            chunk_count: chunk_ids.len(),
-            chunk_ids,
-        });
+        self.files.insert(
+            path_str,
+            FileMeta {
+                hash,
+                mtime,
+                size,
+                chunk_count: chunk_ids.len(),
+                chunk_ids,
+            },
+        );
 
         Ok(())
     }

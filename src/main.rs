@@ -1,24 +1,24 @@
 // Allow dead code - public APIs for future use
 #![allow(dead_code)]
 
+mod bench;
+mod cache;
+mod chunker;
 mod cli;
 mod config;
-mod chunker;
+mod database;
 mod embed;
 mod error;
-mod rerank;
-mod vectordb;
-mod cache;
-mod index;
-mod search;
-mod watch;
-mod server;
-mod bench;
 mod file;
 mod fts;
+mod index;
 mod mcp;
 mod output;
-mod database;
+mod rerank;
+mod search;
+mod server;
+mod vectordb;
+mod watch;
 
 use anyhow::Result;
 use tracing::info;

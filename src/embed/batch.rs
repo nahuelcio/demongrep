@@ -1,6 +1,7 @@
 use super::embedder::FastEmbedder;
 use crate::chunker::Chunk;
 use anyhow::Result;
+use rayon::prelude::*;
 use std::sync::{Arc, Mutex};
 
 /// Statistics for embedding operations
@@ -87,41 +88,50 @@ impl BatchEmbedder {
         }
     }
 
-    /// Embed a batch of chunks
+    /// Embed a batch of chunks with parallel text preparation
     pub fn embed_chunks(&mut self, chunks: Vec<Chunk>) -> Result<Vec<EmbeddedChunk>> {
         if chunks.is_empty() {
             return Ok(Vec::new());
         }
 
         let total = chunks.len();
-        println!("📊 Embedding {} chunks (batch size: {})...", total, self.batch_size);
+        crate::info_print!(
+            "📊 Embedding {} chunks (batch size: {})...",
+            total,
+            self.batch_size
+        );
 
         let start = std::time::Instant::now();
+
+        // Prepare ALL texts in parallel using rayon before batching to the model
+        let all_texts: Vec<String> = chunks
+            .par_iter()
+            .map(|chunk| Self::prepare_text(chunk))
+            .collect();
+
         let mut embedded_chunks = Vec::with_capacity(total);
+        let num_batches = (total + self.batch_size - 1) / self.batch_size;
 
-        // Process in batches
-        for (batch_idx, chunk_batch) in chunks.chunks(self.batch_size).enumerate() {
-            let batch_start = batch_idx * self.batch_size;
-            let batch_end = (batch_start + chunk_batch.len()).min(total);
-
-            println!(
+        // Feed pre-prepared texts to the model in batches
+        for (batch_idx, (chunk_batch, text_batch)) in chunks
+            .chunks(self.batch_size)
+            .zip(all_texts.chunks(self.batch_size))
+            .enumerate()
+        {
+            crate::info_print!(
                 "   Batch {}/{}: chunks {}-{}",
                 batch_idx + 1,
-                (total + self.batch_size - 1) / self.batch_size,
-                batch_start + 1,
-                batch_end
+                num_batches,
+                batch_idx * self.batch_size + 1,
+                (batch_idx * self.batch_size + chunk_batch.len()).min(total)
             );
 
-            // Prepare texts for embedding
-            let texts: Vec<String> = chunk_batch
-                .iter()
-                .map(|chunk| self.prepare_text(chunk))
-                .collect();
-
             // Generate embeddings
-            let embeddings = self.embedder.lock()
+            let embeddings = self
+                .embedder
+                .lock()
                 .map_err(|e| anyhow::anyhow!("Embedder mutex poisoned: {}", e))?
-                .embed_batch(texts)?;
+                .embed_batch(text_batch.to_vec())?;
 
             // Combine chunks with embeddings
             for (chunk, embedding) in chunk_batch.iter().zip(embeddings.into_iter()) {
@@ -130,7 +140,7 @@ impl BatchEmbedder {
         }
 
         let elapsed = start.elapsed();
-        println!(
+        crate::info_print!(
             "✅ Embedded {} chunks in {:.2}s ({:.1} chunks/sec)",
             total,
             elapsed.as_secs_f32(),
@@ -142,21 +152,23 @@ impl BatchEmbedder {
 
     /// Embed a single chunk
     pub fn embed_chunk(&mut self, chunk: Chunk) -> Result<EmbeddedChunk> {
-        let text = self.prepare_text(&chunk);
-        let embedding = self.embedder.lock()
+        let text = Self::prepare_text(&chunk);
+        let embedding = self
+            .embedder
+            .lock()
             .map_err(|e| anyhow::anyhow!("Embedder mutex poisoned: {}", e))?
             .embed_one(&text)?;
         Ok(EmbeddedChunk::new(chunk, embedding))
     }
 
-    /// Prepare chunk text for embedding
+    /// Prepare chunk text for embedding (static - no &self needed)
     ///
     /// Combines different chunk metadata for better embeddings:
     /// - Context breadcrumbs
     /// - Signature (if available)
     /// - Docstring (if available)
     /// - Content
-    fn prepare_text(&self, chunk: &Chunk) -> String {
+    pub fn prepare_text(chunk: &Chunk) -> String {
         let mut parts = Vec::new();
 
         // Add context breadcrumbs (e.g., "File: main.rs > Class: Server")
@@ -187,9 +199,7 @@ impl BatchEmbedder {
 
     /// Get embedding dimensions
     pub fn dimensions(&self) -> usize {
-        self.embedder.lock()
-            .map(|e| e.dimensions())
-            .unwrap_or(384) // safe fallback to most common dimension
+        self.embedder.lock().map(|e| e.dimensions()).unwrap_or(384) // safe fallback to most common dimension
     }
 
     /// Get embedder (locks mutex and returns copy of embedder for reading)
@@ -204,7 +214,10 @@ impl BatchEmbedder {
 /// Clean docstring by removing comment markers
 fn clean_docstring(doc: &str) -> String {
     // First handle triple-quoted strings and JSDoc as special cases
-    let cleaned = if let Some(stripped) = doc.strip_prefix("\"\"\"").and_then(|s| s.strip_suffix("\"\"\"")) {
+    let cleaned = if let Some(stripped) = doc
+        .strip_prefix("\"\"\"")
+        .and_then(|s| s.strip_suffix("\"\"\""))
+    {
         stripped
     } else if let Some(stripped) = doc.strip_prefix("'''").and_then(|s| s.strip_suffix("'''")) {
         stripped
@@ -273,7 +286,10 @@ mod tests {
     #[test]
     fn test_clean_docstring() {
         let rust_doc = "/// This is a doc comment\n/// with multiple lines";
-        assert_eq!(clean_docstring(rust_doc), "This is a doc comment with multiple lines");
+        assert_eq!(
+            clean_docstring(rust_doc),
+            "This is a doc comment with multiple lines"
+        );
 
         let python_doc = "\"\"\"This is a Python docstring\"\"\"";
         assert_eq!(clean_docstring(python_doc), "This is a Python docstring");
@@ -284,13 +300,6 @@ mod tests {
 
     #[test]
     fn test_prepare_text() {
-        let embedder = Arc::new(Mutex::new(FastEmbedder::new().unwrap_or_else(|_| {
-            // For tests, create a mock if real embedder fails
-            panic!("Cannot create embedder in test");
-        })));
-
-        let batch = BatchEmbedder::new(embedder);
-
         let mut chunk = Chunk::new(
             "fn test() { println!(\"test\"); }".to_string(),
             0,
@@ -302,7 +311,7 @@ mod tests {
         chunk.signature = Some("fn test()".to_string());
         chunk.docstring = Some("/// Test function".to_string());
 
-        let text = batch.prepare_text(&chunk);
+        let text = BatchEmbedder::prepare_text(&chunk);
 
         assert!(text.contains("Context: File: test.rs > Function: test"));
         assert!(text.contains("Signature: fn test()"));

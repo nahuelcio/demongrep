@@ -38,7 +38,7 @@ impl FileWatcher {
     pub fn new(root: PathBuf) -> Self {
         // Build gitignore matcher
         let gitignore = Self::build_gitignore(&root);
-        
+
         Self {
             root,
             debouncer: None,
@@ -50,25 +50,25 @@ impl FileWatcher {
     /// Build gitignore matcher from .gitignore, .demongrepignore, and .osgrepignore
     fn build_gitignore(root: &Path) -> Option<Gitignore> {
         let mut builder = GitignoreBuilder::new(root);
-        
+
         // Add .gitignore
         let gitignore_path = root.join(".gitignore");
         if gitignore_path.exists() {
             let _ = builder.add(gitignore_path);
         }
-        
+
         // Add .demongrepignore
         let demongrepignore_path = root.join(".demongrepignore");
         if demongrepignore_path.exists() {
             let _ = builder.add(demongrepignore_path);
         }
-        
+
         // Add .osgrepignore (for compatibility)
         let osgrepignore_path = root.join(".osgrepignore");
         if osgrepignore_path.exists() {
             let _ = builder.add(osgrepignore_path);
         }
-        
+
         // Add common ignore patterns
         let _ = builder.add_line(None, ".git");
         let _ = builder.add_line(None, ".demongrep.db");
@@ -83,7 +83,7 @@ impl FileWatcher {
         let _ = builder.add_line(None, "*.pdb");
         let _ = builder.add_line(None, "*.lock");
         let _ = builder.add_line(None, "*.pyc");
-        
+
         builder.build().ok()
     }
 
@@ -101,18 +101,23 @@ impl FileWatcher {
             Duration::from_millis(debounce_ms),
             None, // No tick rate
             tx,
-        ).map_err(|e| anyhow!("Failed to create file watcher: {}", e))?;
+        )
+        .map_err(|e| anyhow!("Failed to create file watcher: {}", e))?;
 
         self.receiver = Some(rx);
         self.debouncer = Some(debouncer);
 
         // Start watching the root directory
         if let Some(ref mut debouncer) = self.debouncer {
-            debouncer.watcher().watch(&self.root, RecursiveMode::Recursive)
+            debouncer
+                .watcher()
+                .watch(&self.root, RecursiveMode::Recursive)
                 .map_err(|e| anyhow!("Failed to watch directory: {}", e))?;
 
             // Also watch with the cache (for file ID tracking)
-            debouncer.cache().add_root(&self.root, RecursiveMode::Recursive);
+            debouncer
+                .cache()
+                .add_root(&self.root, RecursiveMode::Recursive);
         }
 
         Ok(())
@@ -137,15 +142,15 @@ impl FileWatcher {
             } else {
                 path
             };
-            
+
             // Check if path itself is ignored
             let is_dir = path.is_dir();
             match gitignore.matched(relative_path, is_dir) {
                 ignore::Match::Ignore(_) => return true,
                 ignore::Match::Whitelist(_) => return false,
-                ignore::Match::None => {},
+                ignore::Match::None => {}
             }
-            
+
             // Also check if any parent directory is ignored
             // This handles cases like .git/config where the file is inside an ignored directory
             let mut current = relative_path;
@@ -154,27 +159,54 @@ impl FileWatcher {
                     match gitignore.matched(parent, true) {
                         ignore::Match::Ignore(_) => return true,
                         ignore::Match::Whitelist(_) => return false,
-                        ignore::Match::None => {},
+                        ignore::Match::None => {}
                     }
                 }
                 current = parent;
             }
         }
-        
+
         // Additional check: skip if file is binary (common binary extensions not in gitignore)
         if let Some(ext) = path.extension() {
             let ext_str = ext.to_string_lossy().to_lowercase();
-            if matches!(ext_str.as_str(), 
-                "dll" | "exe" | "so" | "dylib" | "bin" | "pdb" | 
-                "obj" | "o" | "a" | "lib" | "class" | "jar" | 
-                "zip" | "tar" | "gz" | "bz2" | "xz" | "7z" |
-                "png" | "jpg" | "jpeg" | "gif" | "ico" | "svg" |
-                "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx"
+            if matches!(
+                ext_str.as_str(),
+                "dll"
+                    | "exe"
+                    | "so"
+                    | "dylib"
+                    | "bin"
+                    | "pdb"
+                    | "obj"
+                    | "o"
+                    | "a"
+                    | "lib"
+                    | "class"
+                    | "jar"
+                    | "zip"
+                    | "tar"
+                    | "gz"
+                    | "bz2"
+                    | "xz"
+                    | "7z"
+                    | "png"
+                    | "jpg"
+                    | "jpeg"
+                    | "gif"
+                    | "ico"
+                    | "svg"
+                    | "pdf"
+                    | "doc"
+                    | "docx"
+                    | "xls"
+                    | "xlsx"
+                    | "ppt"
+                    | "pptx"
             ) {
                 return true;
             }
         }
-        
+
         false
     }
 

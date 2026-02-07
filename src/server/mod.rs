@@ -1,5 +1,5 @@
-use anyhow::Result;
 use anyhow::anyhow;
+use anyhow::Result;
 use axum::{
     extract::{Json, State},
     http::StatusCode,
@@ -52,32 +52,38 @@ struct ServerState {
     /// Primary (local) database - can be written to via file watching
     local_store: Option<RwLock<VectorStore>>,
     local_db_path: Option<PathBuf>,
-    
+
     /// Global database - read-only for searching
     global_store: Option<RwLock<VectorStore>>,
     #[allow(dead_code)]
     global_db_path: Option<PathBuf>,
-    
+
     /// Shared services
     embedding_service: Mutex<EmbeddingService>,
     chunker: Mutex<SemanticChunker>,
-    
+
     /// File metadata (only for local database)
     file_meta: Option<RwLock<FileMetaStore>>,
-    
+
     /// Project root (for file watching)
     root: PathBuf,
 }
 
 impl ServerState {
     /// Search across all available databases
-    async fn search_all(&self, query_embedding: &[f32], limit: usize) -> Result<Vec<crate::vectordb::SearchResult>> {
+    async fn search_all(
+        &self,
+        query_embedding: &[f32],
+        limit: usize,
+        offset: usize,
+    ) -> Result<(Vec<crate::vectordb::SearchResult>, usize, bool)> {
         let mut all_results = Vec::new();
-        
+        let retrieval_limit = limit.saturating_add(offset);
+
         // Search local database
         if let Some(ref local_store) = self.local_store {
             let store = local_store.read().await;
-            match store.search(query_embedding, limit) {
+            match store.search(query_embedding, retrieval_limit) {
                 Ok(mut results) => {
                     all_results.append(&mut results);
                 }
@@ -86,11 +92,11 @@ impl ServerState {
                 }
             }
         }
-        
+
         // Search global database
         if let Some(ref global_store) = self.global_store {
             let store = global_store.read().await;
-            match store.search(query_embedding, limit) {
+            match store.search(query_embedding, retrieval_limit) {
                 Ok(mut results) => {
                     all_results.append(&mut results);
                 }
@@ -99,11 +105,12 @@ impl ServerState {
                 }
             }
         }
-        
+
         // Deduplicate results by (path, start_line, end_line) and keep highest score
-        let mut seen: std::collections::HashMap<(String, usize, usize), usize> = std::collections::HashMap::new();
+        let mut seen: std::collections::HashMap<(String, usize, usize), usize> =
+            std::collections::HashMap::new();
         let mut deduped_results: Vec<crate::vectordb::SearchResult> = Vec::new();
-        
+
         for result in all_results {
             let key = (result.path.clone(), result.start_line, result.end_line);
             if let Some(&idx) = seen.get(&key) {
@@ -116,14 +123,24 @@ impl ServerState {
                 deduped_results.push(result);
             }
         }
-        
-        // Sort by score and limit
-        deduped_results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
-        deduped_results.truncate(limit);
-        
-        Ok(deduped_results)
+
+        // Sort by score and apply pagination
+        deduped_results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let total_available = deduped_results.len();
+        let paginated_results: Vec<crate::vectordb::SearchResult> = deduped_results
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .collect();
+        let has_more = total_available > offset + paginated_results.len();
+
+        Ok((paginated_results, total_available, has_more))
     }
-    
+
     /// Get combined statistics
     async fn get_combined_stats(&self) -> CombinedStats {
         let mut total_chunks = 0;
@@ -132,7 +149,7 @@ impl ServerState {
         let mut local_files = 0;
         let mut global_chunks = 0;
         let mut global_files = 0;
-        
+
         if let Some(ref local_store) = self.local_store {
             let store = local_store.read().await;
             if let Ok(stats) = store.stats() {
@@ -142,7 +159,7 @@ impl ServerState {
                 total_files += stats.total_files;
             }
         }
-        
+
         if let Some(ref global_store) = self.global_store {
             let store = global_store.read().await;
             if let Ok(stats) = store.stats() {
@@ -152,7 +169,7 @@ impl ServerState {
                 total_files += stats.total_files;
             }
         }
-        
+
         CombinedStats {
             total_chunks,
             total_files,
@@ -180,6 +197,8 @@ struct SearchRequest {
     #[serde(default = "default_limit")]
     limit: usize,
     #[serde(default)]
+    offset: usize,
+    #[serde(default)]
     path: Option<String>,
 }
 
@@ -194,6 +213,8 @@ struct SearchResponse {
     query: String,
     took_ms: u64,
     databases_searched: usize,
+    total_available: usize,
+    has_more: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -244,7 +265,10 @@ struct StatusResponse {
 /// 4. Tracks chunk IDs for efficient incremental updates
 /// 5. **Dual-database support**: Searches both local and global databases
 pub async fn serve(port: u16, path: Option<PathBuf>) -> Result<()> {
-    let root = path.clone().unwrap_or_else(|| PathBuf::from(".")).canonicalize()?;
+    let root = path
+        .clone()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .canonicalize()?;
 
     println!("{}", "🚀 Demongrep Server".bright_cyan().bold());
     println!("{}", "=".repeat(60));
@@ -253,10 +277,11 @@ pub async fn serve(port: u16, path: Option<PathBuf>) -> Result<()> {
 
     // Get all available database paths
     let db_paths = get_search_db_paths(path)?;
-    
+
     if db_paths.is_empty() {
         println!("\n{}", "❌ No databases found!".red());
-        println!("   Run {} or {} first", 
+        println!(
+            "   Run {} or {} first",
             "demongrep index".bright_cyan(),
             "demongrep index --global".bright_cyan()
         );
@@ -266,7 +291,7 @@ pub async fn serve(port: u16, path: Option<PathBuf>) -> Result<()> {
     // Identify local and global databases
     let mut local_db_path: Option<PathBuf> = None;
     let mut global_db_path: Option<PathBuf> = None;
-    
+
     for db_path in db_paths {
         if db_path.ends_with(".demongrep.db") {
             local_db_path = Some(db_path);
@@ -292,20 +317,24 @@ pub async fn serve(port: u16, path: Option<PathBuf>) -> Result<()> {
 
     // Load local database (if exists)
     let (local_store, local_file_meta) = if let Some(ref local_path) = local_db_path {
-        let file_meta = FileMetaStore::load_or_create(local_path, model_type.short_name(), dimensions)?;
+        let file_meta =
+            FileMetaStore::load_or_create(local_path, model_type.short_name(), dimensions)?;
         let store = VectorStore::new(local_path, dimensions)?;
         let stats = store.stats()?;
-        
+
         if stats.total_chunks == 0 {
-            println!("\n{}", "📦 Local database empty, performing initial index...".yellow());
-            let (store, file_meta) = initial_index(
-                root.clone(),
-                local_path.clone(),
-                model_type,
-            ).await?;
+            println!(
+                "\n{}",
+                "📦 Local database empty, performing initial index...".yellow()
+            );
+            let (store, file_meta) =
+                initial_index(root.clone(), local_path.clone(), model_type).await?;
             (Some(store), Some(file_meta))
         } else {
-            println!("   ✅ Local: {} chunks from {} files", stats.total_chunks, stats.total_files);
+            println!(
+                "   ✅ Local: {} chunks from {} files",
+                stats.total_chunks, stats.total_files
+            );
             (Some(store), Some(file_meta))
         }
     } else {
@@ -319,26 +348,36 @@ pub async fn serve(port: u16, path: Option<PathBuf>) -> Result<()> {
         match VectorStore::new(global_path, dimensions) {
             Ok(store) => {
                 let stats = store.stats()?;
-                
+
                 // If no local database, we can watch and update the global one
                 if local_db_path.is_none() {
-                    let file_meta = FileMetaStore::load_or_create(global_path, model_type.short_name(), dimensions)?;
-                    
+                    let file_meta = FileMetaStore::load_or_create(
+                        global_path,
+                        model_type.short_name(),
+                        dimensions,
+                    )?;
+
                     if stats.total_chunks == 0 {
-                        println!("\n{}", "📦 Global database empty, performing initial index...".yellow());
-                        let (store, file_meta) = initial_index(
-                            root.clone(),
-                            global_path.clone(),
-                            model_type,
-                        ).await?;
+                        println!(
+                            "\n{}",
+                            "📦 Global database empty, performing initial index...".yellow()
+                        );
+                        let (store, file_meta) =
+                            initial_index(root.clone(), global_path.clone(), model_type).await?;
                         (Some(store), Some(file_meta))
                     } else {
-                        println!("   ✅ Global: {} chunks from {} files (writable)", stats.total_chunks, stats.total_files);
+                        println!(
+                            "   ✅ Global: {} chunks from {} files (writable)",
+                            stats.total_chunks, stats.total_files
+                        );
                         (Some(store), Some(file_meta))
                     }
                 } else {
                     // Local exists, global is read-only
-                    println!("   ✅ Global: {} chunks from {} files (read-only)", stats.total_chunks, stats.total_files);
+                    println!(
+                        "   ✅ Global: {} chunks from {} files (read-only)",
+                        stats.total_chunks, stats.total_files
+                    );
                     (Some(store), None)
                 }
             }
@@ -350,7 +389,7 @@ pub async fn serve(port: u16, path: Option<PathBuf>) -> Result<()> {
     } else {
         (None, None)
     };
-    
+
     // Determine which database to use for file watching and how to set up the state
     // Priority: local > global
     let state = if local_store.is_some() {
@@ -402,7 +441,8 @@ async fn initial_index(
 
     if files.is_empty() {
         let store = VectorStore::new(&db_path, model_type.dimensions())?;
-        let file_meta = FileMetaStore::new(model_type.short_name().to_string(), model_type.dimensions());
+        let file_meta =
+            FileMetaStore::new(model_type.short_name().to_string(), model_type.dimensions());
         return Ok((store, file_meta));
     }
 
@@ -434,7 +474,8 @@ async fn initial_index(
     store.build_index()?;
 
     // Build file metadata
-    let mut file_meta = FileMetaStore::new(model_type.short_name().to_string(), model_type.dimensions());
+    let mut file_meta =
+        FileMetaStore::new(model_type.short_name().to_string(), model_type.dimensions());
 
     let mut chunk_id_iter = chunk_ids.iter();
     for file in &files {
@@ -455,7 +496,7 @@ async fn initial_index(
 async fn start_server(state: Arc<ServerState>, port: u16, root: PathBuf) -> Result<()> {
     // Check if we have a writable database (local_store contains the primary/writable database)
     let has_writable_store = state.local_store.is_some() && state.file_meta.is_some();
-    
+
     // Start file watcher in background (if we have a writable database)
     if has_writable_store {
         let watcher_state = state.clone();
@@ -466,7 +507,10 @@ async fn start_server(state: Arc<ServerState>, port: u16, root: PathBuf) -> Resu
             }
         });
     } else {
-        println!("\n{}", "ℹ️  No writable database - file watching disabled".dimmed());
+        println!(
+            "\n{}",
+            "ℹ️  No writable database - file watching disabled".dimmed()
+        );
     }
 
     // Build HTTP router
@@ -561,11 +605,13 @@ async fn handle_file_modified(state: &ServerState, path: &PathBuf) -> Result<()>
     if path.is_dir() {
         return Ok(());
     }
-    
+
     // Only handle files in local database
-    let file_meta = state.file_meta.as_ref()
+    let file_meta = state
+        .file_meta
+        .as_ref()
         .ok_or_else(|| anyhow!("No local database available"))?;
-    
+
     // Check if file needs re-indexing
     let file_meta_read: tokio::sync::RwLockReadGuard<'_, FileMetaStore> = file_meta.read().await;
     let (needs_reindex, old_chunk_ids) = file_meta_read.check_file(path)?;
@@ -596,7 +642,8 @@ async fn handle_file_modified(state: &ServerState, path: &PathBuf) -> Result<()>
 
     if chunks.is_empty() {
         // Update metadata with no chunks
-        let mut file_meta_write: tokio::sync::RwLockWriteGuard<'_, FileMetaStore> = file_meta.write().await;
+        let mut file_meta_write: tokio::sync::RwLockWriteGuard<'_, FileMetaStore> =
+            file_meta.write().await;
         file_meta_write.update_file(path, vec![])?;
         return Ok(());
     }
@@ -616,7 +663,8 @@ async fn handle_file_modified(state: &ServerState, path: &PathBuf) -> Result<()>
     };
 
     // Update metadata
-    let mut file_meta_write: tokio::sync::RwLockWriteGuard<'_, FileMetaStore> = file_meta.write().await;
+    let mut file_meta_write: tokio::sync::RwLockWriteGuard<'_, FileMetaStore> =
+        file_meta.write().await;
     file_meta_write.update_file(path, chunk_ids)?;
 
     Ok(())
@@ -627,16 +675,23 @@ async fn handle_file_deleted(state: &ServerState, path: &PathBuf) -> Result<()> 
     if path.is_dir() {
         return Ok(());
     }
-    
+
     // Only handle files in local database
-    let file_meta = state.file_meta.as_ref()
+    let file_meta = state
+        .file_meta
+        .as_ref()
         .ok_or_else(|| anyhow!("No local database available"))?;
-    
-    let mut file_meta_write: tokio::sync::RwLockWriteGuard<'_, FileMetaStore> = file_meta.write().await;
+
+    let mut file_meta_write: tokio::sync::RwLockWriteGuard<'_, FileMetaStore> =
+        file_meta.write().await;
 
     if let Some(meta) = file_meta_write.remove_file(path) {
         if !meta.chunk_ids.is_empty() {
-            println!("  🗑️  Removing: {} ({} chunks)", path.display(), meta.chunk_ids.len());
+            println!(
+                "  🗑️  Removing: {} ({} chunks)",
+                path.display(),
+                meta.chunk_ids.len()
+            );
             if let Some(ref local_store) = state.local_store {
                 let mut store = local_store.write().await;
                 store.delete_chunks(&meta.chunk_ids)?;
@@ -649,21 +704,18 @@ async fn handle_file_deleted(state: &ServerState, path: &PathBuf) -> Result<()> 
 
 // HTTP Handlers
 
-async fn health_handler(
-    State(state): State<Arc<ServerState>>,
-) -> Json<HealthResponse> {
+async fn health_handler(State(state): State<Arc<ServerState>>) -> Json<HealthResponse> {
     let stats = state.get_combined_stats().await;
-    
+
     let model_name = if let Some(ref file_meta) = state.file_meta {
         let meta = file_meta.read().await;
         meta.model_name.clone()
     } else {
         ModelType::default().name().to_string()
     };
-    
-    let databases_available = 
-        (if state.local_store.is_some() { 1 } else { 0 }) +
-        (if state.global_store.is_some() { 1 } else { 0 });
+
+    let databases_available = (if state.local_store.is_some() { 1 } else { 0 })
+        + (if state.global_store.is_some() { 1 } else { 0 });
 
     Json(HealthResponse {
         status: "ready".to_string(),
@@ -678,11 +730,9 @@ async fn health_handler(
     })
 }
 
-async fn status_handler(
-    State(state): State<Arc<ServerState>>,
-) -> Json<StatusResponse> {
+async fn status_handler(State(state): State<Arc<ServerState>>) -> Json<StatusResponse> {
     let stats = state.get_combined_stats().await;
-    
+
     let (model_name, dimensions) = if let Some(ref file_meta) = state.file_meta {
         let meta = file_meta.read().await;
         (meta.model_name.clone(), meta.dimensions)
@@ -690,10 +740,9 @@ async fn status_handler(
         let model = ModelType::default();
         (model.name().to_string(), model.dimensions())
     };
-    
-    let databases_available = 
-        (if state.local_store.is_some() { 1 } else { 0 }) +
-        (if state.global_store.is_some() { 1 } else { 0 });
+
+    let databases_available = (if state.local_store.is_some() { 1 } else { 0 })
+        + (if state.global_store.is_some() { 1 } else { 0 });
 
     Json(StatusResponse {
         total_files: stats.total_files,
@@ -717,17 +766,19 @@ async fn search_handler(
     // Embed query
     let query_embedding = {
         let mut embedding_service = state.embedding_service.lock().await;
-        embedding_service.embed_query(&req.query)
+        embedding_service
+            .embed_query(&req.query)
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
     };
 
     // Search across all databases
-    let results = state.search_all(&query_embedding, req.limit).await
+    let (results, total_available, has_more) = state
+        .search_all(&query_embedding, req.limit, req.offset)
+        .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    
-    let databases_searched = 
-        (if state.local_store.is_some() { 1 } else { 0 }) +
-        (if state.global_store.is_some() { 1 } else { 0 });
+
+    let databases_searched = (if state.local_store.is_some() { 1 } else { 0 })
+        + (if state.global_store.is_some() { 1 } else { 0 });
 
     // Convert to response format
     let search_results: Vec<SearchResult> = results
@@ -751,9 +802,11 @@ async fn search_handler(
             } else {
                 "global".to_string()
             };
-            
+
             // Make path relative to root
-            let rel_path = r.path.strip_prefix(state.root.to_str().unwrap_or(""))
+            let rel_path = r
+                .path
+                .strip_prefix(state.root.to_str().unwrap_or(""))
                 .unwrap_or(&r.path)
                 .trim_start_matches('/')
                 .to_string();
@@ -777,6 +830,8 @@ async fn search_handler(
         query: req.query,
         took_ms,
         databases_searched,
+        total_available,
+        has_more,
     }))
 }
 

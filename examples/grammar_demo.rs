@@ -8,7 +8,10 @@ fn main() {
     let manager = GrammarManager::new();
 
     println!("📚 Grammar Manager initialized");
-    println!("   Supported languages: {}", manager.supported_languages().len());
+    println!(
+        "   Supported languages: {}",
+        manager.supported_languages().len()
+    );
 
     // Show supported languages
     println!("\n✅ Supported languages:");
@@ -25,34 +28,70 @@ fn main() {
     // Load Rust grammar
     println!("\n🦀 Loading Rust grammar...");
     let rust_grammar = manager.get_grammar(Language::Rust);
-    println!("   Result: {}", if rust_grammar.is_some() { "✅ Success" } else { "❌ Failed" });
+    println!(
+        "   Result: {}",
+        if rust_grammar.is_some() {
+            "✅ Success"
+        } else {
+            "❌ Failed"
+        }
+    );
 
     // Load Python grammar
     println!("\n🐍 Loading Python grammar...");
     let python_grammar = manager.get_grammar(Language::Python);
-    println!("   Result: {}", if python_grammar.is_some() { "✅ Success" } else { "❌ Failed" });
+    println!(
+        "   Result: {}",
+        if python_grammar.is_some() {
+            "✅ Success"
+        } else {
+            "❌ Failed"
+        }
+    );
 
     // Try unsupported language
     println!("\n📝 Trying unsupported language (Markdown)...");
     let markdown_grammar = manager.get_grammar(Language::Markdown);
-    println!("   Result: {}", if markdown_grammar.is_some() { "✅ Loaded" } else { "❌ Not supported (expected)" });
+    println!(
+        "   Result: {}",
+        if markdown_grammar.is_some() {
+            "✅ Loaded"
+        } else {
+            "❌ Not supported (expected)"
+        }
+    );
 
     // Show stats after loading
     let stats_after = manager.stats();
     println!("\n📊 Stats after loading:");
     println!("   Cached grammars: {}", stats_after.cached_grammars);
-    println!("   Cache hit rate: {}/{} loaded",
-             stats_after.cached_grammars,
-             stats_after.supported_languages);
+    println!(
+        "   Cache hit rate: {}/{} loaded",
+        stats_after.cached_grammars, stats_after.supported_languages
+    );
 
     // Test caching - load Rust again
     println!("\n♻️  Testing cache (loading Rust again)...");
     let rust_grammar2 = manager.get_grammar(Language::Rust);
-    println!("   Result: {}", if rust_grammar2.is_some() { "✅ From cache" } else { "❌ Failed" });
+    println!(
+        "   Result: {}",
+        if rust_grammar2.is_some() {
+            "✅ From cache"
+        } else {
+            "❌ Failed"
+        }
+    );
 
     // Verify same Arc
     if let (Some(g1), Some(g2)) = (rust_grammar, rust_grammar2) {
-        println!("   Same Arc: {}", if std::sync::Arc::ptr_eq(&g1, &g2) { "✅ Yes (cached)" } else { "❌ No" });
+        println!(
+            "   Same Arc: {}",
+            if std::sync::Arc::ptr_eq(&g1, &g2) {
+                "✅ Yes (cached)"
+            } else {
+                "❌ No"
+            }
+        );
     }
 
     // Demo: Parse some Rust code
@@ -120,9 +159,10 @@ class Calculator:
     println!("\n⚡ Pre-loading all grammars...");
     manager.preload_all();
     let final_stats = manager.stats();
-    println!("   Cached grammars: {}/{}",
-             final_stats.cached_grammars,
-             final_stats.supported_languages);
+    println!(
+        "   Cached grammars: {}/{}",
+        final_stats.cached_grammars, final_stats.supported_languages
+    );
 
     println!("\n✅ Demo complete!\n");
 }

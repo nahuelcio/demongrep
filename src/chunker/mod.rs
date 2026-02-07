@@ -4,11 +4,9 @@ use std::path::Path;
 
 mod dedup;
 mod extractor;
-mod fallback;
 mod grammar;
 mod parser;
 mod semantic;
-mod tree_sitter;
 
 pub use grammar::GrammarManager;
 pub use parser::CodeParser;

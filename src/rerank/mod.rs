@@ -53,7 +53,9 @@ pub fn rrf_fusion(
         let chunk_id = result.id;
         let rrf_score = 1.0 / (k + rank as f32 + 1.0);
 
-        let entry = scores.entry(chunk_id).or_insert((0.0, None, None, None, None));
+        let entry = scores
+            .entry(chunk_id)
+            .or_insert((0.0, None, None, None, None));
         entry.0 += rrf_score;
         entry.1 = Some(result.score);
         entry.3 = Some(rank + 1);
@@ -64,7 +66,9 @@ pub fn rrf_fusion(
         let chunk_id = result.chunk_id;
         let rrf_score = 1.0 / (k + rank as f32 + 1.0);
 
-        let entry = scores.entry(chunk_id).or_insert((0.0, None, None, None, None));
+        let entry = scores
+            .entry(chunk_id)
+            .or_insert((0.0, None, None, None, None));
         entry.0 += rrf_score;
         entry.2 = Some(result.score);
         entry.4 = Some(rank + 1);
@@ -73,20 +77,24 @@ pub fn rrf_fusion(
     // Convert to FusedResult and sort by RRF score
     let mut results: Vec<FusedResult> = scores
         .into_iter()
-        .map(|(chunk_id, (rrf_score, vector_score, fts_score, vector_rank, fts_rank))| {
-            FusedResult {
+        .map(
+            |(chunk_id, (rrf_score, vector_score, fts_score, vector_rank, fts_rank))| FusedResult {
                 chunk_id,
                 rrf_score,
                 vector_score,
                 fts_score,
                 vector_rank,
                 fts_rank,
-            }
-        })
+            },
+        )
         .collect();
 
     // Sort by RRF score descending
-    results.sort_by(|a, b| b.rrf_score.partial_cmp(&a.rrf_score).unwrap_or(std::cmp::Ordering::Equal));
+    results.sort_by(|a, b| {
+        b.rrf_score
+            .partial_cmp(&a.rrf_score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     results
 }
@@ -148,7 +156,7 @@ mod tests {
         let fts_results = vec![
             make_fts_result(2, 10.0), // ID 2 is top in FTS
             make_fts_result(1, 8.0),
-            make_fts_result(4, 6.0),  // ID 4 only in FTS
+            make_fts_result(4, 6.0), // ID 4 only in FTS
         ];
 
         let fused = rrf_fusion(&vector_results, &fts_results, 20.0);
@@ -193,10 +201,7 @@ mod tests {
 
     #[test]
     fn test_vector_only() {
-        let vector_results = vec![
-            make_vector_result(1, 0.9),
-            make_vector_result(2, 0.8),
-        ];
+        let vector_results = vec![make_vector_result(1, 0.9), make_vector_result(2, 0.8)];
 
         let results = vector_only(&vector_results);
 

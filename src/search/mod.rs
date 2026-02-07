@@ -18,6 +18,8 @@ use crate::vectordb::VectorStore;
 struct JsonOutput {
     query: String,
     results: Vec<JsonResult>,
+    total_available: usize,
+    has_more: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     timing: Option<JsonTiming>,
 }
@@ -47,8 +49,6 @@ struct JsonTiming {
     rerank_ms: Option<u64>,
 }
 
-
-
 /// Read model metadata from database
 fn read_metadata(db_path: &PathBuf) -> Option<(String, usize)> {
     let metadata_path = db_path.join("metadata.json");
@@ -66,6 +66,7 @@ fn read_metadata(db_path: &PathBuf) -> Option<(String, usize)> {
 #[allow(clippy::too_many_arguments)]
 pub async fn search(
     query: &str,
+    offset: usize,
     max_results: usize,
     per_file: usize,
     content: bool,
@@ -84,21 +85,26 @@ pub async fn search(
 ) -> Result<()> {
     // Get all database paths (local + global)
     let db_paths = get_search_db_paths(path.clone())?;
-    
+
     if db_paths.is_empty() {
         println!("{}", "❌ No database found!".red());
-        println!("   Run {} or {} first", 
+        println!(
+            "   Run {} or {} first",
             "demongrep index".bright_cyan(),
             "demongrep index --global".bright_cyan()
         );
         return Ok(());
     }
-    
+
     // Show which databases we're searching (unless in JSON mode)
     if !json && db_paths.len() > 1 {
         println!("{}", "🔍 Searching in multiple databases...".dimmed());
         for db_path in &db_paths {
-            let db_type = if db_path.ends_with(".demongrep.db") { "Local" } else { "Global" };
+            let db_type = if db_path.ends_with(".demongrep.db") {
+                "Local"
+            } else {
+                "Global"
+            };
             println!("   {} {}", db_type, db_path.display().to_string().dimmed());
         }
         println!();
@@ -106,11 +112,11 @@ pub async fn search(
 
     // Collect all results from all databases
     let mut all_results: Vec<crate::vectordb::SearchResult> = Vec::new();
-    let mut total_embed_duration = Duration::ZERO;
+    let total_embed_duration: Duration;
     let mut total_search_duration = Duration::ZERO;
     let mut total_load_duration = Duration::ZERO;
-    let mut model_load_duration = Duration::ZERO;
-    
+    let model_load_duration: Duration;
+
     // We'll use the first database's model/dimensions, or override
     let (model_type, dimensions) = if let Some(override_model) = model_override {
         (override_model, override_model.dimensions())
@@ -118,40 +124,47 @@ pub async fn search(
         if let Some(mt) = ModelType::from_str(&model_name) {
             (mt, dims)
         } else {
-            eprintln!("{}", "⚠️  Unknown model in metadata, using default".yellow());
+            eprintln!(
+                "{}",
+                "⚠️  Unknown model in metadata, using default".yellow()
+            );
             (ModelType::default(), 384)
         }
     } else {
         (ModelType::default(), 384)
     };
-    
+
     // Initialize embedding service once (shared across all databases)
+    // Use persistent disk cache for faster re-indexing
     let start = Instant::now();
-    let mut embedding_service = EmbeddingService::with_model(model_type)?;
+    let mut embedding_service = EmbeddingService::with_model_and_db(model_type, &db_paths[0])?;
     model_load_duration = start.elapsed();
-    
+
     // Embed query once
     let start = Instant::now();
     let query_embedding = embedding_service.embed_query(query)?;
     total_embed_duration = start.elapsed();
-    
+
     // Search in each database
     for db_path in db_paths {
-
         // Perform sync if requested
         if sync {
             if !json {
-                let db_type: &str = if db_path.ends_with(".demongrep.db") { "Local" } else { "Global" };
+                let db_type: &str = if db_path.ends_with(".demongrep.db") {
+                    "Local"
+                } else {
+                    "Global"
+                };
                 println!("{}", format!("🔄 Syncing {} database...", db_type).yellow());
             }
             sync_database(&db_path, model_type)?;
         }
-        
+
         // Load this database
         let start = Instant::now();
         let store = VectorStore::new(&db_path, dimensions)?;
         total_load_duration += start.elapsed();
-        
+
         // Search in this database
         let start = Instant::now();
         let retrieval_limit = if vector_only_mode { max_results } else { 200 };
@@ -167,19 +180,27 @@ pub async fn search(
                 }
                 Err(_) => {
                     if !json {
-                        eprintln!("{}", "⚠️  FTS index not found, using vector-only search".yellow());
+                        eprintln!(
+                            "{}",
+                            "⚠️  FTS index not found, using vector-only search".yellow()
+                        );
                     }
                     vector_only(&vector_results)
                 }
             }
         };
-        
+
         // Map fused results back to full SearchResult
         let chunk_id_to_result: std::collections::HashMap<u32, &crate::vectordb::SearchResult> =
             vector_results.iter().map(|r| (r.id, r)).collect();
-        
-        let take_count = if rerank { rerank_top.min(fused_results.len()) } else { max_results };
-        
+
+        let requested_count = max_results.saturating_add(offset);
+        let take_count = if rerank {
+            rerank_top.max(requested_count).min(fused_results.len())
+        } else {
+            requested_count.min(fused_results.len())
+        };
+
         for fused in fused_results.iter().take(take_count) {
             if let Some(result) = chunk_id_to_result.get(&fused.chunk_id) {
                 let mut r = (*result).clone();
@@ -192,14 +213,15 @@ pub async fn search(
                 }
             }
         }
-        
+
         total_search_duration += start.elapsed();
     }
-    
+
     // Deduplicate results by (path, start_line, end_line) and keep highest score
-    let mut seen: std::collections::HashMap<(String, usize, usize), usize> = std::collections::HashMap::new();
+    let mut seen: std::collections::HashMap<(String, usize, usize), usize> =
+        std::collections::HashMap::new();
     let mut results: Vec<crate::vectordb::SearchResult> = Vec::new();
-    
+
     for result in all_results {
         let key = (result.path.clone(), result.start_line, result.end_line);
         if let Some(&idx) = seen.get(&key) {
@@ -212,9 +234,13 @@ pub async fn search(
             results.push(result);
         }
     }
-    
+
     // Sort by score
-    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    results.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // Neural reranking (if enabled)
     let mut rerank_duration = Duration::ZERO;
@@ -226,7 +252,8 @@ pub async fn search(
                 let rrf_scores: Vec<f32> = results.iter().map(|r| r.score).collect();
                 match reranker.rerank_and_blend(query, &documents, &rrf_scores) {
                     Ok(reranked) => {
-                        let mut reordered: Vec<crate::vectordb::SearchResult> = Vec::with_capacity(results.len());
+                        let mut reordered: Vec<crate::vectordb::SearchResult> =
+                            Vec::with_capacity(results.len());
                         for (idx, score) in reranked {
                             let mut result = results[idx].clone();
                             result.score = score;
@@ -268,12 +295,15 @@ pub async fn search(
         results.retain(|r| r.kind.to_lowercase().contains(&kind_lower));
     }
 
-    // Truncate to max_results after reranking and filtering
-    results.truncate(max_results);
+    // Apply pagination after reranking and filtering
+    let total_available = results.len();
+    let paginated_results: Vec<crate::vectordb::SearchResult> =
+        results.into_iter().skip(offset).take(max_results).collect();
+    let has_more = total_available > offset + paginated_results.len();
 
     // Output results
     if json {
-        let json_results: Vec<JsonResult> = results
+        let json_results: Vec<JsonResult> = paginated_results
             .iter()
             .map(|r| JsonResult {
                 path: r.path.clone(),
@@ -290,10 +320,19 @@ pub async fn search(
 
         let timing = if scores {
             Some(JsonTiming {
-                total_ms: (total_load_duration + model_load_duration + total_embed_duration + total_search_duration + rerank_duration).as_millis() as u64,
+                total_ms: (total_load_duration
+                    + model_load_duration
+                    + total_embed_duration
+                    + total_search_duration
+                    + rerank_duration)
+                    .as_millis() as u64,
                 embed_ms: total_embed_duration.as_millis() as u64,
                 search_ms: total_search_duration.as_millis() as u64,
-                rerank_ms: if rerank { Some(rerank_duration.as_millis() as u64) } else { None },
+                rerank_ms: if rerank {
+                    Some(rerank_duration.as_millis() as u64)
+                } else {
+                    None
+                },
             })
         } else {
             None
@@ -302,6 +341,8 @@ pub async fn search(
         let output = JsonOutput {
             query: query.to_string(),
             results: json_results,
+            total_available,
+            has_more,
             timing,
         };
 
@@ -312,7 +353,7 @@ pub async fn search(
     if compact {
         // Show only file paths (like grep -l)
         let mut seen_files = std::collections::HashSet::new();
-        for result in &results {
+        for result in &paginated_results {
             if !seen_files.contains(&result.path) {
                 println!("{}", result.path);
                 seen_files.insert(result.path.clone());
@@ -325,7 +366,16 @@ pub async fn search(
     println!("{}", "🔍 Search Results".bright_cyan().bold());
     println!("{}", "=".repeat(60));
     println!("Query: \"{}\"", query.bright_yellow());
-    println!("Found {} results", results.len());
+    println!("Found {} results", paginated_results.len());
+    if offset > 0 || has_more {
+        let shown_from = if paginated_results.is_empty() {
+            0
+        } else {
+            offset + 1
+        };
+        let shown_to = offset + paginated_results.len();
+        println!("Showing {}-{} of {}", shown_from, shown_to, total_available);
+    }
     println!();
 
     if scores {
@@ -337,37 +387,54 @@ pub async fn search(
         if rerank {
             println!("   Reranking:     {:?}", rerank_duration);
         }
-        println!("   Total:         {:?}", total_load_duration + model_load_duration + total_embed_duration + total_search_duration + rerank_duration);
+        println!(
+            "   Total:         {:?}",
+            total_load_duration
+                + model_load_duration
+                + total_embed_duration
+                + total_search_duration
+                + rerank_duration
+        );
         println!();
     }
 
     // Check if no results
-    if results.is_empty() {
+    if paginated_results.is_empty() {
         println!("{}", "No matches found.".dimmed());
         println!("Try:");
         println!("  - Using different keywords");
         println!("  - Making your query more general");
-        println!("  - Running {} if the codebase changed", "demongrep index".bright_cyan());
+        println!(
+            "  - Running {} if the codebase changed",
+            "demongrep index".bright_cyan()
+        );
         return Ok(());
     }
 
     // Group results by file if per_file > 0
     if per_file > 0 && per_file < max_results {
-        let mut by_file: std::collections::HashMap<String, Vec<_>> = std::collections::HashMap::new();
+        let mut by_file: std::collections::HashMap<String, Vec<_>> =
+            std::collections::HashMap::new();
 
-        for result in results {
+        for result in paginated_results {
             by_file.entry(result.path.clone()).or_default().push(result);
         }
 
         let mut files: Vec<_> = by_file.into_iter().collect();
         files.sort_by(|a, b| {
-            b.1.iter().map(|r| r.score).fold(0.0f32, f32::max)
+            b.1.iter()
+                .map(|r| r.score)
+                .fold(0.0f32, f32::max)
                 .partial_cmp(&a.1.iter().map(|r| r.score).fold(0.0f32, f32::max))
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         for (_file_path, mut file_results) in files {
-            file_results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+            file_results.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
             file_results.truncate(per_file);
 
             for (idx, result) in file_results.iter().enumerate() {
@@ -376,7 +443,7 @@ pub async fn search(
         }
     } else {
         // Show all results
-        for result in &results {
+        for result in &paginated_results {
             print_result(result, true, content, scores)?;
         }
     }
@@ -389,7 +456,8 @@ pub fn sync_database(db_path: &PathBuf, model_type: ModelType) -> Result<()> {
     let project_path = db_path.parent().unwrap_or(std::path::Path::new("."));
 
     // Load file metadata store
-    let mut file_meta = FileMetaStore::load_or_create(db_path, model_type.short_name(), model_type.dimensions())?;
+    let mut file_meta =
+        FileMetaStore::load_or_create(db_path, model_type.short_name(), model_type.dimensions())?;
 
     // Walk the file system
     let walker = FileWalker::new(project_path.to_path_buf());
@@ -476,9 +544,7 @@ fn print_result(
     // Show location and kind
     let location = format!(
         "   Lines {}-{} • {}",
-        result.start_line,
-        result.end_line,
-        result.kind
+        result.start_line, result.end_line, result.kind
     );
     println!("{}", location.dimmed());
 
@@ -498,11 +564,14 @@ fn print_result(
         };
 
         let score_text = format!("   Score: {:.3}", result.score);
-        println!("{}", match score_color {
-            "green" => score_text.green(),
-            "yellow" => score_text.yellow(),
-            _ => score_text.red(),
-        });
+        println!(
+            "{}",
+            match score_color {
+                "green" => score_text.green(),
+                "yellow" => score_text.yellow(),
+                _ => score_text.red(),
+            }
+        );
     }
 
     // Show context if available
@@ -537,12 +606,7 @@ fn print_result(
         }
     } else {
         // Show a snippet
-        let snippet: String = result
-            .content
-            .lines()
-            .take(3)
-            .collect::<Vec<_>>()
-            .join(" ");
+        let snippet: String = result.content.lines().take(3).collect::<Vec<_>>().join(" ");
 
         let snippet = if snippet.len() > 100 {
             // Find a valid UTF-8 boundary to avoid panic on multi-byte chars

@@ -1,8 +1,4 @@
-use demongrep::{
-    chunker::SemanticChunker,
-    embed::EmbeddingService,
-    file::Language,
-};
+use demongrep::{chunker::SemanticChunker, embed::EmbeddingService, file::Language};
 use std::path::Path;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -111,10 +107,12 @@ fn process_analytics(user_id: u32, data: Vec<f64>) -> Vec<f64> {
 
     // Show chunk details
     for (i, chunk) in chunks.iter().enumerate() {
-        println!("Chunk {}: [{:?}] {}",
+        println!(
+            "Chunk {}: [{:?}] {}",
             i + 1,
             chunk.kind,
-            chunk.signature.as_ref().unwrap_or(&"N/A".to_string()));
+            chunk.signature.as_ref().unwrap_or(&"N/A".to_string())
+        );
     }
     println!();
 
@@ -150,10 +148,14 @@ fn process_analytics(user_id: u32, data: Vec<f64>) -> Vec<f64> {
 
         println!("   Top {} results:", results.len());
         for (i, (chunk, score)) in results.iter().enumerate() {
-            println!("      {}. [{:?}] {}",
+            println!(
+                "      {}. [{:?}] {}",
                 i + 1,
                 chunk.chunk.kind,
-                chunk.chunk.signature.as_ref().unwrap_or(&format!("line {}-{}", chunk.chunk.start_line, chunk.chunk.end_line))
+                chunk.chunk.signature.as_ref().unwrap_or(&format!(
+                    "line {}-{}",
+                    chunk.chunk.start_line, chunk.chunk.end_line
+                ))
             );
             println!("         Similarity: {:.4}", score);
         }

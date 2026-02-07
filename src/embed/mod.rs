@@ -1,12 +1,15 @@
-mod embedder;
 mod batch;
 mod cache;
+mod embedder;
+mod persistent_cache;
 
-pub use embedder::{FastEmbedder, ModelType};
 pub use batch::{BatchEmbedder, EmbeddedChunk};
-pub use cache::{CachedBatchEmbedder, CacheStats};
+pub use cache::{CacheStats, CachedBatchEmbedder};
+pub use embedder::{FastEmbedder, ModelType};
+pub use persistent_cache::PersistentEmbeddingCache;
 
 use anyhow::Result;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 /// High-level embedding service that combines all features
@@ -21,7 +24,7 @@ impl EmbeddingService {
         Self::with_model(ModelType::default())
     }
 
-    /// Create a new embedding service with specified model
+    /// Create a new embedding service with specified model (in-memory cache only)
     pub fn with_model(model_type: ModelType) -> Result<Self> {
         let embedder = FastEmbedder::with_model(model_type)?;
         let arc_embedder = Arc::new(Mutex::new(embedder));
@@ -34,8 +37,27 @@ impl EmbeddingService {
         })
     }
 
+    /// Create a new embedding service with persistent disk cache
+    pub fn with_model_and_db(model_type: ModelType, db_path: &Path) -> Result<Self> {
+        let embedder = FastEmbedder::with_model(model_type)?;
+        let arc_embedder = Arc::new(Mutex::new(embedder));
+        let batch_embedder = BatchEmbedder::new(arc_embedder);
+
+        let persistent_cache = PersistentEmbeddingCache::new(db_path, model_type.short_name())?;
+        let cached_embedder =
+            CachedBatchEmbedder::with_persistent_cache(batch_embedder, persistent_cache);
+
+        Ok(Self {
+            cached_embedder,
+            model_type,
+        })
+    }
+
     /// Embed a batch of chunks with caching
-    pub fn embed_chunks(&mut self, chunks: Vec<crate::chunker::Chunk>) -> Result<Vec<EmbeddedChunk>> {
+    pub fn embed_chunks(
+        &mut self,
+        chunks: Vec<crate::chunker::Chunk>,
+    ) -> Result<Vec<EmbeddedChunk>> {
         self.cached_embedder.embed_chunks(chunks)
     }
 
@@ -47,7 +69,8 @@ impl EmbeddingService {
     /// Embed query text
     pub fn embed_query(&mut self, query: &str) -> Result<Vec<f32>> {
         let embedder_arc = &self.cached_embedder.batch_embedder.embedder;
-        let mut guard = embedder_arc.lock()
+        let mut guard = embedder_arc
+            .lock()
             .map_err(|e| anyhow::anyhow!("Embedding mutex poisoned: {}", e))?;
         guard.embed_one(query)
     }

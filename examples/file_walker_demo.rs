@@ -32,7 +32,11 @@ fn main() {
             // Show first 10 files
             println!("\nFirst 10 indexable files:");
             for file in files.iter().take(10) {
-                println!("  {:10} {}", format!("[{}]", file.language.name()), file.path.display());
+                println!(
+                    "  {:10} {}",
+                    format!("[{}]", file.language.name()),
+                    file.path.display()
+                );
             }
 
             if files.len() > 10 {

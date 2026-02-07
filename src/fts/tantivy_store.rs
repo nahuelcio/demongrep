@@ -8,9 +8,15 @@ use tantivy::{
     collector::TopDocs,
     directory::MmapDirectory,
     query::QueryParser,
-    schema::{Field, Schema, STORED, STRING, TEXT, NumericOptions, Value},
-    Index, IndexReader, IndexWriter, IndexSettings, TantivyDocument, Term,
+    schema::{
+        Field, IndexRecordOption, NumericOptions, Schema, TextFieldIndexing, TextOptions, Value,
+        STORED, STRING,
+    },
+    tokenizer::{LowerCaser, TextAnalyzer},
+    Index, IndexReader, IndexSettings, IndexWriter, TantivyDocument, Term,
 };
+
+use super::code_tokenizer::CodeTokenizer;
 
 /// Result from FTS search
 #[derive(Debug, Clone)]
@@ -38,6 +44,13 @@ pub struct FtsStore {
 }
 
 impl FtsStore {
+    fn register_tokenizers(index: &Index) {
+        let code_analyzer = TextAnalyzer::builder(CodeTokenizer)
+            .filter(LowerCaser)
+            .build();
+        index.tokenizers().register("code", code_analyzer);
+    }
+
     /// Create or open an FTS index at the given path
     pub fn new(db_path: &Path) -> Result<Self> {
         let fts_path = db_path.join("fts");
@@ -52,20 +65,26 @@ impl FtsStore {
             NumericOptions::default().set_indexed().set_stored(),
         );
 
+        let code_text = TextOptions::default().set_indexing_options(
+            TextFieldIndexing::default()
+                .set_tokenizer("code")
+                .set_index_option(IndexRecordOption::WithFreqsAndPositions),
+        );
+
         // Content - full text indexed for BM25 search
-        let content_field = schema_builder.add_text_field("content", TEXT);
+        let content_field = schema_builder.add_text_field("content", code_text.clone());
 
         // Path - stored and string indexed for filtering
         let path_field = schema_builder.add_text_field("path", STRING | STORED);
 
         // Signature - indexed for function/method name search
-        let signature_field = schema_builder.add_text_field("signature", TEXT);
+        let signature_field = schema_builder.add_text_field("signature", code_text.clone());
 
         // Kind - stored for filtering (function, class, etc)
         let kind_field = schema_builder.add_text_field("kind", STRING | STORED);
 
         // String literals - indexed for literal value search
-        let string_literals_field = schema_builder.add_text_field("string_literals", TEXT);
+        let string_literals_field = schema_builder.add_text_field("string_literals", code_text);
 
         let schema = schema_builder.build();
 
@@ -76,6 +95,7 @@ impl FtsStore {
             let dir = MmapDirectory::open(&fts_path)?;
             Index::create(dir, schema.clone(), IndexSettings::default())?
         };
+        Self::register_tokenizers(&index);
 
         // Create reader for searching
         let reader = index.reader()?;
@@ -103,23 +123,28 @@ impl FtsStore {
         }
 
         let index = Index::open_in_dir(&fts_path)?;
+        Self::register_tokenizers(&index);
         let schema = index.schema();
 
-        let chunk_id_field = schema.get_field("chunk_id")
+        let chunk_id_field = schema
+            .get_field("chunk_id")
             .map_err(|_| anyhow!("Missing chunk_id field"))?;
-        let content_field = schema.get_field("content")
+        let content_field = schema
+            .get_field("content")
             .map_err(|_| anyhow!("Missing content field"))?;
-        let path_field = schema.get_field("path")
+        let path_field = schema
+            .get_field("path")
             .map_err(|_| anyhow!("Missing path field"))?;
-        let signature_field = schema.get_field("signature")
+        let signature_field = schema
+            .get_field("signature")
             .map_err(|_| anyhow!("Missing signature field"))?;
-        let kind_field = schema.get_field("kind")
+        let kind_field = schema
+            .get_field("kind")
             .map_err(|_| anyhow!("Missing kind field"))?;
-        let string_literals_field = schema.get_field("string_literals")
-            .unwrap_or_else(|_| {
-                // For backward compatibility with old indexes
-                schema.get_field("content").unwrap()
-            });
+        let string_literals_field = schema.get_field("string_literals").unwrap_or_else(|_| {
+            // For backward compatibility with old indexes
+            schema.get_field("content").unwrap()
+        });
 
         let reader = index.reader()?;
 
@@ -226,9 +251,13 @@ impl FtsStore {
         // Parse query against content, signature, and string_literals fields
         let mut query_parser = QueryParser::for_index(
             &self.index,
-            vec![self.content_field, self.signature_field, self.string_literals_field],
+            vec![
+                self.content_field,
+                self.signature_field,
+                self.string_literals_field,
+            ],
         );
-        
+
         // Set conjunction mode (AND) by default for multi-term queries
         // This makes "embedding model" require BOTH terms to be present
         query_parser.set_conjunction_by_default();
@@ -238,8 +267,12 @@ impl FtsStore {
             Ok(q) => q,
             Err(_) => {
                 // Try escaping special characters
-                let escaped = query
-                    .replace([':', '(', ')', '[', ']', '{', '}', '^', '"', '~', '*', '?', '\\', '/'], " ");
+                let escaped = query.replace(
+                    [
+                        ':', '(', ')', '[', ']', '{', '}', '^', '"', '~', '*', '?', '\\', '/',
+                    ],
+                    " ",
+                );
                 query_parser.parse_query(&escaped)?
             }
         };
@@ -305,9 +338,30 @@ mod tests {
         let mut store = FtsStore::new(&db_path)?;
 
         // Add some chunks
-        store.add_chunk(1, "fn hello_world() { println!(\"Hello!\"); }", "src/main.rs", Some("hello_world"), "function", &["Hello!".to_string()])?;
-        store.add_chunk(2, "struct UserConfig { name: String, age: u32 }", "src/config.rs", Some("UserConfig"), "struct", &[])?;
-        store.add_chunk(3, "fn process_data(data: Vec<u8>) -> Result<()>", "src/processor.rs", Some("process_data"), "function", &[])?;
+        store.add_chunk(
+            1,
+            "fn hello_world() { println!(\"Hello!\"); }",
+            "src/main.rs",
+            Some("hello_world"),
+            "function",
+            &["Hello!".to_string()],
+        )?;
+        store.add_chunk(
+            2,
+            "struct UserConfig { name: String, age: u32 }",
+            "src/config.rs",
+            Some("UserConfig"),
+            "struct",
+            &[],
+        )?;
+        store.add_chunk(
+            3,
+            "fn process_data(data: Vec<u8>) -> Result<()>",
+            "src/processor.rs",
+            Some("process_data"),
+            "function",
+            &[],
+        )?;
 
         store.commit()?;
 
@@ -321,8 +375,18 @@ mod tests {
         assert!(!results.is_empty());
         assert_eq!(results[0].chunk_id, 2);
 
+        // Search split camelCase identifier as separate terms
+        let results = store.search("user config", 10)?;
+        assert!(!results.is_empty());
+        assert_eq!(results[0].chunk_id, 2);
+
         // Search for process
         let results = store.search("process data", 10)?;
+        assert!(!results.is_empty());
+        assert_eq!(results[0].chunk_id, 3);
+
+        // Search snake_case identifier as separate terms
+        let results = store.search("process_data", 10)?;
         assert!(!results.is_empty());
         assert_eq!(results[0].chunk_id, 3);
 
@@ -365,18 +429,18 @@ mod tests {
 
         // Add chunks with string literals
         store.add_chunk(
-            1, 
-            "requestHeaders = [(\"API-VERSION\", \"2\")]", 
-            "src/api.rs", 
-            None, 
+            1,
+            "requestHeaders = [(\"API-VERSION\", \"2\")]",
+            "src/api.rs",
+            None,
             "block",
             &["API-VERSION".to_string(), "2".to_string()],
         )?;
         store.add_chunk(
-            2, 
-            "const version = \"1.0\";", 
-            "src/version.rs", 
-            None, 
+            2,
+            "const version = \"1.0\";",
+            "src/version.rs",
+            None,
             "block",
             &["1.0".to_string()],
         )?;
@@ -384,7 +448,10 @@ mod tests {
 
         // Search for "api-version 2" should find the first chunk
         let results = store.search("api-version 2", 10)?;
-        assert!(!results.is_empty(), "Should find chunk with API-VERSION and 2");
+        assert!(
+            !results.is_empty(),
+            "Should find chunk with API-VERSION and 2"
+        );
 
         Ok(())
     }

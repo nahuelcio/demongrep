@@ -17,14 +17,13 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use crate::database::DatabaseManager;  // NEW: Use DatabaseManager
+use crate::database::DatabaseManager; // NEW: Use DatabaseManager
 use crate::embed::EmbeddingService;
-
 
 /// Demongrep MCP service with dual-database support via DatabaseManager
 pub struct DemongrepService {
     tool_router: ToolRouter<DemongrepService>,
-    db_manager: DatabaseManager,  // NEW: Replaced db_paths with DatabaseManager
+    db_manager: DatabaseManager, // NEW: Replaced db_paths with DatabaseManager
     // Lazily initialized on first search
     embedding_service: Mutex<Option<EmbeddingService>>,
 }
@@ -46,6 +45,8 @@ pub struct SemanticSearchRequest {
 
     /// Maximum number of results to return (default: 10)
     pub limit: Option<usize>,
+    /// Offset for pagination (default: 0)
+    pub offset: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -78,6 +79,8 @@ pub struct HybridSearchRequest {
     pub query: String,
     /// Maximum number of results to return (default: 10)
     pub limit: Option<usize>,
+    /// Offset for pagination (default: 0)
+    pub offset: Option<usize>,
     /// Filter results to a specific path prefix (e.g., "src/")
     pub filter_path: Option<String>,
     /// RRF k parameter for score fusion (default: 20)
@@ -130,7 +133,9 @@ impl DemongrepService {
 
     /// Get or initialize the embedding service
     fn get_embedding_service(&self) -> Result<std::sync::MutexGuard<'_, Option<EmbeddingService>>> {
-        let mut guard = self.embedding_service.lock()
+        let mut guard = self
+            .embedding_service
+            .lock()
             .map_err(|e| anyhow::anyhow!("MCP embedding mutex poisoned: {}", e))?;
         if guard.is_none() {
             *guard = Some(EmbeddingService::with_model(self.db_manager.model_type())?);
@@ -138,12 +143,15 @@ impl DemongrepService {
         Ok(guard)
     }
 
-    #[tool(description = "Search the codebase using semantic similarity. Searches both local and global databases. Returns code chunks that are semantically similar to the query.")]
+    #[tool(
+        description = "Search the codebase using semantic similarity. Searches both local and global databases. Returns code chunks that are semantically similar to the query."
+    )]
     async fn semantic_search(
         &self,
         Parameters(request): Parameters<SemanticSearchRequest>,
     ) -> Result<CallToolResult, McpError> {
         let limit = request.limit.unwrap_or(10);
+        let offset = request.offset.unwrap_or(0);
 
         // Get embedding service and embed query
         let mut service_guard = match self.get_embedding_service() {
@@ -168,7 +176,7 @@ impl DemongrepService {
         };
 
         // Search across all databases using DatabaseManager
-        let results = match self.db_manager.search_all(&query_embedding, limit) {
+        let results = match self.db_manager.search_all(&query_embedding, limit, offset) {
             Ok(r) => r,
             Err(e) => {
                 return Ok(CallToolResult::success(vec![Content::text(format!(
@@ -189,7 +197,9 @@ impl DemongrepService {
             .into_iter()
             .map(|r| {
                 // Determine which database this came from based on path
-                let database = self.db_manager.databases()
+                let database = self
+                    .db_manager
+                    .databases()
                     .iter()
                     .find(|db| r.path.starts_with(db.path.to_str().unwrap_or("")))
                     .map(|db| match db.db_type {
@@ -216,7 +226,9 @@ impl DemongrepService {
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
-    #[tool(description = "Get all indexed chunks from a specific file. Searches across all databases. Useful for understanding the structure of a file.")]
+    #[tool(
+        description = "Get all indexed chunks from a specific file. Searches across all databases. Useful for understanding the structure of a file."
+    )]
     async fn get_file_chunks(
         &self,
         Parameters(request): Parameters<GetFileChunksRequest>,
@@ -226,7 +238,7 @@ impl DemongrepService {
         // Search across all databases
         for database in self.db_manager.databases() {
             let store = database.store();
-            
+
             let stats = match store.stats() {
                 Ok(s) => s,
                 Err(_) => continue,
@@ -277,12 +289,15 @@ impl DemongrepService {
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
-    #[tool(description = "Search the codebase using hybrid search (vector similarity + BM25 full-text + RRF fusion). More accurate than semantic_search alone. Searches both local and global databases.")]
+    #[tool(
+        description = "Search the codebase using hybrid search (vector similarity + BM25 full-text + RRF fusion). More accurate than semantic_search alone. Searches both local and global databases."
+    )]
     async fn hybrid_search(
         &self,
         Parameters(request): Parameters<HybridSearchRequest>,
     ) -> Result<CallToolResult, McpError> {
         let limit = request.limit.unwrap_or(10);
+        let offset = request.offset.unwrap_or(0);
         let rrf_k = request.rrf_k.unwrap_or(20.0);
 
         // Get embedding service and embed query
@@ -312,6 +327,7 @@ impl DemongrepService {
             &request.query,
             &query_embedding,
             limit,
+            offset,
             rrf_k,
         ) {
             Ok(r) => r,
@@ -358,7 +374,9 @@ impl DemongrepService {
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
-    #[tool(description = "Re-index changed files in all databases. Detects modified, new, and deleted files and updates the index incrementally.")]
+    #[tool(
+        description = "Re-index changed files in all databases. Detects modified, new, and deleted files and updates the index incrementally."
+    )]
     async fn reindex(
         &self,
         Parameters(_request): Parameters<ReindexRequest>,
@@ -387,7 +405,9 @@ impl DemongrepService {
         ))]))
     }
 
-    #[tool(description = "Find code definitions (functions, structs, traits, methods, etc.) across all databases. Useful for navigating the codebase structure.")]
+    #[tool(
+        description = "Find code definitions (functions, structs, traits, methods, etc.) across all databases. Useful for navigating the codebase structure."
+    )]
     async fn find_definitions(
         &self,
         Parameters(request): Parameters<FindDefinitionsRequest>,
@@ -463,9 +483,7 @@ impl DemongrepService {
         }
 
         // Sort by path and line
-        definitions.sort_by(|a, b| {
-            a.path.cmp(&b.path).then(a.start_line.cmp(&b.start_line))
-        });
+        definitions.sort_by(|a, b| a.path.cmp(&b.path).then(a.start_line.cmp(&b.start_line)));
 
         if definitions.is_empty() {
             let msg = match (&request.kind, &request.pattern) {
@@ -477,12 +495,13 @@ impl DemongrepService {
             return Ok(CallToolResult::success(vec![Content::text(msg)]));
         }
 
-        let json =
-            serde_json::to_string_pretty(&definitions).unwrap_or_else(|_| "[]".to_string());
+        let json = serde_json::to_string_pretty(&definitions).unwrap_or_else(|_| "[]".to_string());
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
-    #[tool(description = "Get the status of the semantic search index including model info and statistics from all databases.")]
+    #[tool(
+        description = "Get the status of the semantic search index including model info and statistics from all databases."
+    )]
     async fn index_status(&self) -> Result<CallToolResult, McpError> {
         // Use DatabaseManager for stats - MUCH SIMPLER!
         let stats = match self.db_manager.combined_stats() {
@@ -505,7 +524,12 @@ impl DemongrepService {
             global_files: stats.global_files,
             model: self.db_manager.model_type().short_name().to_string(),
             dimensions: stats.dimensions,
-            databases: self.db_manager.database_paths().iter().map(|p| p.display().to_string()).collect(),
+            databases: self
+                .db_manager
+                .database_paths()
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect(),
             databases_available: self.db_manager.database_count(),
         };
 
@@ -558,7 +582,8 @@ pub async fn run_mcp_server(path: Option<PathBuf>) -> Result<()> {
     eprintln!("Starting demongrep MCP server...");
     eprintln!("Databases loaded:");
     for database in db_manager.databases() {
-        eprintln!("  {} {}", 
+        eprintln!(
+            "  {} {}",
             match database.db_type {
                 crate::database::DatabaseType::Local => "📍 Local: ",
                 crate::database::DatabaseType::Global => "🌍 Global:",
