@@ -1,0 +1,30 @@
+{
+  "queries": [
+    {
+      "query": "test cases and unit tests",
+      "expected_file": "test",
+      "description": "Test files"
+    },
+    {
+      "query": "main entry point where execution starts",
+      "expected_file": "main",
+      "description": "Application entry point"
+    },
+    {
+      "query": "database models and data structures",
+      "expected_file": "model",
+      "description": "Data models"
+    },
+    {
+      "query": "configuration settings and parameters",
+      "expected_file": "config",
+      "description": "Configuration files"
+    },
+    {
+      "query": "error handling and exceptions",
+      "expected_file": "error",
+      "description": "Error handling"
+    }
+  ],
+  "false_positive_query": "kubernetes deployment yaml docker container orchestration"
+}

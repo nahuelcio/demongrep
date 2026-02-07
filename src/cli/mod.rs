@@ -90,6 +90,14 @@ pub enum Commands {
         /// Filter results to files under this path (e.g., "src/")
         #[arg(long)]
         filter_path: Option<String>,
+
+        /// Filter results by chunk kind (e.g., "Function", "Struct", "Trait", "Method")
+        #[arg(long)]
+        kind: Option<String>,
+
+        /// Optimized output for coding agents (combines --json --quiet --sync --content -m 10)
+        #[arg(long)]
+        agent: bool,
     },
 
     /// Index the repository
@@ -165,6 +173,12 @@ pub enum Commands {
         #[arg(short, long)]
         global: bool,
     },
+
+    /// Configure Codex MCP integration
+    InstallCodex,
+
+    /// Configure OpenCode MCP integration
+    InstallOpencode,
 }
 
 pub async fn run() -> Result<()> {
@@ -203,7 +217,17 @@ pub async fn run() -> Result<()> {
             rerank,
             rerank_top,
             filter_path,
+            kind,
+            agent,
         } => {
+            // --agent mode: override flags for optimized agent output
+            let (max_results, content, sync, json) = if agent {
+                crate::output::set_quiet(true);
+                (10, true, true, true)
+            } else {
+                (max_results, content, sync, json)
+            };
+
             // Auto-enable quiet mode for JSON output
             if json {
                 crate::output::set_quiet(true);
@@ -224,6 +248,7 @@ pub async fn run() -> Result<()> {
                 rrf_k,
                 rerank,
                 rerank_top,
+                kind,
             )
             .await
         }
@@ -241,9 +266,13 @@ pub async fn run() -> Result<()> {
          Commands::Setup { model } => crate::cli::setup::run(model).await,
          Commands::Mcp { path } => crate::mcp::run_mcp_server(path).await,
          Commands::InstallClaudeCode { global } => crate::cli::install_claude_code::run(global),
+         Commands::InstallCodex => crate::cli::install_codex::run(),
+         Commands::InstallOpencode => crate::cli::install_opencode::run(),
      }
  }
- 
+
  mod doctor;
  mod setup;
  mod install_claude_code;
+ mod install_codex;
+ mod install_opencode;

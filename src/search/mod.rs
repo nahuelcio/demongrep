@@ -80,6 +80,7 @@ pub async fn search(
     rrf_k: f32,
     rerank: bool,
     rerank_top: usize,
+    kind_filter: Option<String>,
 ) -> Result<()> {
     // Get all database paths (local + global)
     let db_paths = get_search_db_paths(path.clone())?;
@@ -261,6 +262,12 @@ pub async fn search(
         });
     }
 
+    // Filter by chunk kind if specified
+    if let Some(ref kind) = kind_filter {
+        let kind_lower = kind.to_lowercase();
+        results.retain(|r| r.kind.to_lowercase().contains(&kind_lower));
+    }
+
     // Truncate to max_results after reranking and filtering
     results.truncate(max_results);
 
@@ -378,7 +385,7 @@ pub async fn search(
 }
 
 /// Sync database by re-indexing changed files
-fn sync_database(db_path: &PathBuf, model_type: ModelType) -> Result<()> {
+pub fn sync_database(db_path: &PathBuf, model_type: ModelType) -> Result<()> {
     let project_path = db_path.parent().unwrap_or(std::path::Path::new("."));
 
     // Load file metadata store

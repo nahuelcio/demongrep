@@ -117,7 +117,8 @@ fn main() -> Result<()> {
     for model_type in models {
         println!("═══════════════════════════════════════════════════════════════");
         println!("🧪 Testing: {}", model_type.name());
-        println!("   Dimensions: {} | Quantized: {}",
+        println!(
+            "   Dimensions: {} | Quantized: {}",
             model_type.dimensions(),
             model_type.is_quantized()
         );
@@ -189,7 +190,8 @@ fn auto_generate_config(path: &Path) -> Result<BenchmarkConfig> {
 
         // Main/entry point
         if (path_str.contains("main") || path_str.contains("entry") || path_str.contains("index"))
-            && !seen_patterns.contains("entry") {
+            && !seen_patterns.contains("entry")
+        {
             queries.push(TestQuery {
                 query: "main entry point where execution starts".to_string(),
                 expected_file: "main".to_string(),
@@ -200,7 +202,8 @@ fn auto_generate_config(path: &Path) -> Result<BenchmarkConfig> {
 
         // Config
         if (path_str.contains("config") || path_str.contains("settings"))
-            && !seen_patterns.contains("config") {
+            && !seen_patterns.contains("config")
+        {
             queries.push(TestQuery {
                 query: "configuration settings and parameters".to_string(),
                 expected_file: "config".to_string(),
@@ -221,7 +224,8 @@ fn auto_generate_config(path: &Path) -> Result<BenchmarkConfig> {
 
         // Database/models
         if (path_str.contains("model") || path_str.contains("db") || path_str.contains("database"))
-            && !seen_patterns.contains("models") {
+            && !seen_patterns.contains("models")
+        {
             queries.push(TestQuery {
                 query: "database models and data structures".to_string(),
                 expected_file: "model".to_string(),
@@ -232,7 +236,8 @@ fn auto_generate_config(path: &Path) -> Result<BenchmarkConfig> {
 
         // API/Routes
         if (path_str.contains("api") || path_str.contains("route") || path_str.contains("endpoint"))
-            && !seen_patterns.contains("api") {
+            && !seen_patterns.contains("api")
+        {
             queries.push(TestQuery {
                 query: "API endpoints and routes".to_string(),
                 expected_file: "api".to_string(),
@@ -243,7 +248,8 @@ fn auto_generate_config(path: &Path) -> Result<BenchmarkConfig> {
 
         // Utils/helpers
         if (path_str.contains("util") || path_str.contains("helper"))
-            && !seen_patterns.contains("utils") {
+            && !seen_patterns.contains("utils")
+        {
             queries.push(TestQuery {
                 query: "utility functions and helpers".to_string(),
                 expected_file: "util".to_string(),
@@ -254,7 +260,8 @@ fn auto_generate_config(path: &Path) -> Result<BenchmarkConfig> {
 
         // Auth/security
         if (path_str.contains("auth") || path_str.contains("security"))
-            && !seen_patterns.contains("auth") {
+            && !seen_patterns.contains("auth")
+        {
             queries.push(TestQuery {
                 query: "authentication and security".to_string(),
                 expected_file: "auth".to_string(),
@@ -297,7 +304,8 @@ fn auto_generate_config(path: &Path) -> Result<BenchmarkConfig> {
 
     Ok(BenchmarkConfig {
         queries,
-        false_positive_query: "kubernetes deployment yaml docker container orchestration".to_string(),
+        false_positive_query: "kubernetes deployment yaml docker container orchestration"
+            .to_string(),
     })
 }
 
@@ -410,7 +418,11 @@ fn benchmark_model(
             "   {} \"{}\" -> {} (score: {:.3})",
             if is_correct { "✅" } else { "❌" },
             &test_query.query[..test_query.query.len().min(40)],
-            best_chunk.path.split('/').last().unwrap_or(&best_chunk.path),
+            best_chunk
+                .path
+                .split('/')
+                .last()
+                .unwrap_or(&best_chunk.path),
             best_score
         );
     }
@@ -456,9 +468,9 @@ fn print_result(result: &BenchmarkResult) {
         result.query_results.len(),
         result.avg_score
     );
-    println!("   📊 Query time: {:?} | False positive: {:.3}",
-        result.avg_query_time,
-        result.false_positive_score
+    println!(
+        "   📊 Query time: {:?} | False positive: {:.3}",
+        result.avg_query_time, result.false_positive_score
     );
 }
 
@@ -488,7 +500,7 @@ fn print_summary(results: &[BenchmarkResult]) {
     );
     println!("{}", "─".repeat(75));
 
-    for r in sorted {
+    for r in &sorted {
         println!(
             "{:<20} {:>6} {:>7.0}% {:>10.3} {:>12.2?} {:>10.2?}",
             r.model.short_name(),
@@ -505,7 +517,8 @@ fn print_summary(results: &[BenchmarkResult]) {
     // Recommendation
     if let Some(best) = sorted.first() {
         println!("🏆 RECOMMENDATION: {}", best.model.name());
-        println!("   Accuracy: {:.0}% | Dimensions: {} | Speed: {:?}",
+        println!(
+            "   Accuracy: {:.0}% | Dimensions: {} | Speed: {:?}",
             best.accuracy * 100.0,
             best.model.dimensions(),
             best.index_time
@@ -545,7 +558,7 @@ fn save_reports(
                         "found": qr.found,
                         "score": qr.score,
                         "correct": qr.correct
-                    )
+                    })
                 }).collect::<Vec<_>>()
             })
         })
@@ -558,7 +571,10 @@ fn save_reports(
     let mut md = String::new();
 
     md.push_str("# Demongrep Model Benchmark Report\n\n");
-    md.push_str(&format!("**Date**: {}\n\n", chrono::Local::now().format("%Y-%m-%d %H:%M")));
+    md.push_str(&format!(
+        "**Date**: {}\n\n",
+        chrono::Local::now().format("%Y-%m-%d %H:%M")
+    ));
 
     // Summary table
     md.push_str("## Summary\n\n");
@@ -573,7 +589,7 @@ fn save_reports(
             .then(b.avg_score.partial_cmp(&a.avg_score).unwrap())
     });
 
-    for r in sorted {
+    for r in &sorted {
         md.push_str(&format!(
             "| {} | {} | {:.0}% | {:.3} | {:.2?} | {:.2?} |\n",
             r.model.short_name(),
@@ -593,9 +609,15 @@ fn save_reports(
         md.push_str(&format!("- **Dimensions**: {}\n", best.model.dimensions()));
         md.push_str(&format!("- **Quantized**: {}\n", best.model.is_quantized()));
         md.push_str(&format!("- **Indexing Time**: {:.2?}\n", best.index_time));
-        md.push_str(&format!("- **Avg Query Time**: {:.2?}\n\n", best.avg_query_time));
+        md.push_str(&format!(
+            "- **Avg Query Time**: {:.2?}\n\n",
+            best.avg_query_time
+        ));
         md.push_str("### Usage\n\n");
-        md.push_str(&format!("```bash\ndemongrep index --model {}\n```\n\n", best.model.short_name()));
+        md.push_str(&format!(
+            "```bash\ndemongrep index --model {}\n```\n\n",
+            best.model.short_name()
+        ));
     }
 
     // Detailed results per model
@@ -604,13 +626,17 @@ fn save_reports(
     for r in results {
         md.push_str(&format!("### {}\n\n", r.model.name()));
         md.push_str(&format!("- **Dimensions**: {}\n", r.model.dimensions()));
-        md.push_str(&format!("- **Accuracy**: {:.0}% ({}/{})\n",
+        md.push_str(&format!(
+            "- **Accuracy**: {:.0}% ({}/{})\n",
             r.accuracy * 100.0,
             r.query_results.iter().filter(|qr| qr.correct).count(),
             r.query_results.len()
         ));
         md.push_str(&format!("- **Avg Score**: {:.3}\n", r.avg_score));
-        md.push_str(&format!("- **False Positive Score**: {:.3}\n\n", r.false_positive_score));
+        md.push_str(&format!(
+            "- **False Positive Score**: {:.3}\n\n",
+            r.false_positive_score
+        ));
 
         md.push_str("#### Query Results\n\n");
         md.push_str("| Query | Expected | Found | Score | Status |\n");

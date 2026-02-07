@@ -72,6 +72,34 @@ pub struct SearchResultItem {
     pub database: Option<String>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct HybridSearchRequest {
+    /// The search query (natural language or code snippet)
+    pub query: String,
+    /// Maximum number of results to return (default: 10)
+    pub limit: Option<usize>,
+    /// Filter results to a specific path prefix (e.g., "src/")
+    pub filter_path: Option<String>,
+    /// RRF k parameter for score fusion (default: 20)
+    pub rrf_k: Option<f32>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ReindexRequest {
+    /// Optional path to reindex (defaults to project root)
+    pub path: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FindDefinitionsRequest {
+    /// Optional name pattern to search for (e.g., "auth", "parse")
+    pub pattern: Option<String>,
+    /// Filter by kind: "Function", "Struct", "Trait", "Method", "Enum", "Impl", "Class", "Interface"
+    pub kind: Option<String>,
+    /// Maximum results (default: 20)
+    pub limit: Option<usize>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct IndexStatusResponse {
     pub indexed: bool,
@@ -249,6 +277,211 @@ impl DemongrepService {
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
+    #[tool(description = "Search the codebase using hybrid search (vector similarity + BM25 full-text + RRF fusion). More accurate than semantic_search alone. Searches both local and global databases.")]
+    async fn hybrid_search(
+        &self,
+        Parameters(request): Parameters<HybridSearchRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        let limit = request.limit.unwrap_or(10);
+        let rrf_k = request.rrf_k.unwrap_or(20.0);
+
+        // Get embedding service and embed query
+        let mut service_guard = match self.get_embedding_service() {
+            Ok(g) => g,
+            Err(e) => {
+                return Ok(CallToolResult::success(vec![Content::text(format!(
+                    "Error initializing embedding service: {}",
+                    e
+                ))]));
+            }
+        };
+
+        let service = service_guard.as_mut().unwrap();
+        let query_embedding = match service.embed_query(&request.query) {
+            Ok(e) => e,
+            Err(e) => {
+                return Ok(CallToolResult::success(vec![Content::text(format!(
+                    "Error embedding query: {}",
+                    e
+                ))]));
+            }
+        };
+
+        // Use hybrid search (vector + FTS + RRF)
+        let mut results = match self.db_manager.hybrid_search_all(
+            &request.query,
+            &query_embedding,
+            limit,
+            rrf_k,
+        ) {
+            Ok(r) => r,
+            Err(e) => {
+                return Ok(CallToolResult::success(vec![Content::text(format!(
+                    "Error searching: {}",
+                    e
+                ))]));
+            }
+        };
+
+        // Filter by path if specified
+        if let Some(ref filter) = request.filter_path {
+            let filter_normalized = filter.trim_start_matches("./");
+            results.retain(|r| {
+                let path_normalized = r.path.trim_start_matches("./");
+                path_normalized.starts_with(filter_normalized)
+            });
+        }
+
+        if results.is_empty() {
+            return Ok(CallToolResult::success(vec![Content::text(
+                "No results found for the query.",
+            )]));
+        }
+
+        let items: Vec<SearchResultItem> = results
+            .into_iter()
+            .map(|r| SearchResultItem {
+                path: r.path,
+                start_line: r.start_line,
+                end_line: r.end_line,
+                kind: r.kind,
+                content: r.content,
+                score: r.score,
+                signature: r.signature,
+                context_prev: r.context_prev,
+                context_next: r.context_next,
+                database: None,
+            })
+            .collect();
+
+        let json = serde_json::to_string_pretty(&items).unwrap_or_else(|_| "[]".to_string());
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
+    #[tool(description = "Re-index changed files in all databases. Detects modified, new, and deleted files and updates the index incrementally.")]
+    async fn reindex(
+        &self,
+        Parameters(_request): Parameters<ReindexRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        let mut total_changes = 0;
+        let model_type = self.db_manager.model_type();
+
+        for database in self.db_manager.databases() {
+            match crate::search::sync_database(&database.path, model_type) {
+                Ok(()) => {
+                    total_changes += 1; // At minimum we checked
+                }
+                Err(e) => {
+                    return Ok(CallToolResult::success(vec![Content::text(format!(
+                        "Error reindexing {} database: {}",
+                        database.db_type.name(),
+                        e
+                    ))]));
+                }
+            }
+        }
+
+        Ok(CallToolResult::success(vec![Content::text(format!(
+            "Reindex complete. Checked {} database(s).",
+            total_changes
+        ))]))
+    }
+
+    #[tool(description = "Find code definitions (functions, structs, traits, methods, etc.) across all databases. Useful for navigating the codebase structure.")]
+    async fn find_definitions(
+        &self,
+        Parameters(request): Parameters<FindDefinitionsRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        let limit = request.limit.unwrap_or(20);
+        let mut definitions: Vec<SearchResultItem> = Vec::new();
+
+        for database in self.db_manager.databases() {
+            let store = database.store();
+
+            let stats = match store.stats() {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            for id in 0..stats.total_chunks as u32 {
+                if let Ok(Some(chunk)) = store.get_chunk(id) {
+                    // Skip non-definition kinds (Block, Anchor, Other)
+                    let kind_lower = chunk.kind.to_lowercase();
+                    if kind_lower == "block" || kind_lower == "anchor" || kind_lower == "other" {
+                        continue;
+                    }
+
+                    // Filter by kind if specified
+                    if let Some(ref kind_filter) = request.kind {
+                        if !kind_lower.contains(&kind_filter.to_lowercase()) {
+                            continue;
+                        }
+                    }
+
+                    // Filter by pattern if specified (matches signature or content)
+                    if let Some(ref pattern) = request.pattern {
+                        let pattern_lower = pattern.to_lowercase();
+                        let matches_signature = chunk
+                            .signature
+                            .as_ref()
+                            .map(|s| s.to_lowercase().contains(&pattern_lower))
+                            .unwrap_or(false);
+                        let matches_content = chunk.content.to_lowercase().contains(&pattern_lower);
+
+                        if !matches_signature && !matches_content {
+                            continue;
+                        }
+                    }
+
+                    let db_type = match database.db_type {
+                        crate::database::DatabaseType::Local => "local",
+                        crate::database::DatabaseType::Global => "global",
+                    };
+
+                    definitions.push(SearchResultItem {
+                        path: chunk.path,
+                        start_line: chunk.start_line,
+                        end_line: chunk.end_line,
+                        kind: chunk.kind,
+                        content: chunk.content,
+                        score: 1.0,
+                        signature: chunk.signature,
+                        context_prev: chunk.context_prev,
+                        context_next: chunk.context_next,
+                        database: Some(db_type.to_string()),
+                    });
+
+                    if definitions.len() >= limit {
+                        break;
+                    }
+                }
+            }
+
+            if definitions.len() >= limit {
+                break;
+            }
+        }
+
+        // Sort by path and line
+        definitions.sort_by(|a, b| {
+            a.path.cmp(&b.path).then(a.start_line.cmp(&b.start_line))
+        });
+
+        if definitions.is_empty() {
+            let msg = match (&request.kind, &request.pattern) {
+                (Some(k), Some(p)) => format!("No {} definitions matching '{}' found.", k, p),
+                (Some(k), None) => format!("No {} definitions found.", k),
+                (None, Some(p)) => format!("No definitions matching '{}' found.", p),
+                (None, None) => "No definitions found.".to_string(),
+            };
+            return Ok(CallToolResult::success(vec![Content::text(msg)]));
+        }
+
+        let json =
+            serde_json::to_string_pretty(&definitions).unwrap_or_else(|_| "[]".to_string());
+        Ok(CallToolResult::success(vec![Content::text(json)]))
+    }
+
     #[tool(description = "Get the status of the semantic search index including model info and statistics from all databases.")]
     async fn index_status(&self) -> Result<CallToolResult, McpError> {
         // Use DatabaseManager for stats - MUCH SIMPLER!
@@ -297,9 +530,10 @@ impl ServerHandler for DemongrepService {
             },
             instructions: Some(
                 "Demongrep is a semantic code search tool with dual-database support. \
-                 Use semantic_search to find code by meaning (searches both local and global databases), \
-                 get_file_chunks to see all chunks in a file, and index_status \
-                 to check if the index is ready and see stats from all databases."
+                 Tools: semantic_search (vector similarity), hybrid_search (vector + BM25 + RRF fusion, most accurate), \
+                 find_definitions (browse functions/structs/traits by kind and name), \
+                 get_file_chunks (see all chunks in a file), reindex (update index with file changes), \
+                 index_status (check index readiness and stats)."
                     .to_string(),
             ),
             ..Default::default()

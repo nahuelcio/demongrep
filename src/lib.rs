@@ -20,7 +20,7 @@ pub mod output;
 pub mod database;
 
 // Re-export commonly used types
-pub use config::Config;
+pub use config::ProjectConfig;
 pub use error::DemongrepError;
 pub use file::{FileInfo, FileWalker, Language, WalkStats};
 pub use chunker::{Chunk, ChunkKind, Chunker};

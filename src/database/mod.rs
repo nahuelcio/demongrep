@@ -7,7 +7,9 @@ use anyhow::{anyhow, Result};
 use std::path::PathBuf;
 
 use crate::embed::ModelType;
+use crate::fts::FtsStore;
 use crate::index::get_search_db_paths;
+use crate::rerank::rrf_fusion;
 use crate::vectordb::{SearchResult, VectorStore};
 
 /// Type of database (local or global)
@@ -33,16 +35,20 @@ pub struct Database {
     pub path: PathBuf,
     pub db_type: DatabaseType,
     store: VectorStore,
+    fts_store: Option<FtsStore>,
 }
 
 impl Database {
     /// Create a new database instance
     pub fn new(path: PathBuf, db_type: DatabaseType, dimensions: usize) -> Result<Self> {
         let store = VectorStore::new(&path, dimensions)?;
+        // Try to open FTS store (optional - may not exist yet)
+        let fts_store = FtsStore::open_readonly(&path).ok();
         Ok(Self {
             path,
             db_type,
             store,
+            fts_store,
         })
     }
 
@@ -54,6 +60,11 @@ impl Database {
     /// Get mutable vector store
     pub fn store_mut(&mut self) -> &mut VectorStore {
         &mut self.store
+    }
+
+    /// Get the FTS store (if available)
+    pub fn fts_store(&self) -> Option<&FtsStore> {
+        self.fts_store.as_ref()
     }
 }
 
@@ -199,6 +210,81 @@ impl DatabaseManager {
         all_results.truncate(limit);
 
         Ok(all_results)
+    }
+
+    /// Hybrid search across all databases (vector + FTS + RRF fusion)
+    pub fn hybrid_search_all(
+        &self,
+        query: &str,
+        query_embedding: &[f32],
+        limit: usize,
+        rrf_k: f32,
+    ) -> Result<Vec<SearchResult>> {
+        let mut all_results: Vec<SearchResult> = Vec::new();
+        let retrieval_limit = 200; // Retrieve more for fusion
+
+        for database in &self.databases {
+            // Vector search
+            let vector_results = match database.store.search(query_embedding, retrieval_limit) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!(
+                        "Warning: Vector search failed in {} database: {}",
+                        database.db_type.name(),
+                        e
+                    );
+                    continue;
+                }
+            };
+
+            // FTS search + RRF fusion
+            let fused_results = if let Some(fts) = &database.fts_store {
+                match fts.search(query, retrieval_limit) {
+                    Ok(fts_results) => rrf_fusion(&vector_results, &fts_results, rrf_k),
+                    Err(_) => crate::rerank::vector_only(&vector_results),
+                }
+            } else {
+                crate::rerank::vector_only(&vector_results)
+            };
+
+            // Map fused results back to SearchResult
+            let chunk_id_to_result: std::collections::HashMap<u32, &SearchResult> =
+                vector_results.iter().map(|r| (r.id, r)).collect();
+
+            for fused in fused_results.iter().take(limit) {
+                if let Some(result) = chunk_id_to_result.get(&fused.chunk_id) {
+                    let mut r = (*result).clone();
+                    r.score = fused.rrf_score;
+                    all_results.push(r);
+                } else if let Ok(Some(mut result)) = database.store.get_chunk_as_result(fused.chunk_id) {
+                    result.score = fused.rrf_score;
+                    all_results.push(result);
+                }
+            }
+        }
+
+        // Deduplicate by (path, start_line, end_line)
+        let mut seen: std::collections::HashMap<(String, usize, usize), usize> =
+            std::collections::HashMap::new();
+        let mut results: Vec<SearchResult> = Vec::new();
+
+        for result in all_results {
+            let key = (result.path.clone(), result.start_line, result.end_line);
+            if let Some(&idx) = seen.get(&key) {
+                if result.score > results[idx].score {
+                    results[idx] = result;
+                }
+            } else {
+                seen.insert(key, results.len());
+                results.push(result);
+            }
+        }
+
+        // Sort by score descending and truncate
+        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(limit);
+
+        Ok(results)
     }
 
     /// Get combined statistics from all databases
