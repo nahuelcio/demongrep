@@ -176,13 +176,37 @@ pub enum Commands {
         /// Install for global/user configuration instead of local project
         #[arg(short, long)]
         global: bool,
+
+        /// Explicit project path for MCP args (defaults to current directory)
+        #[arg(long)]
+        project_path: Option<PathBuf>,
+
+        /// Preview planned config changes without writing files
+        #[arg(long)]
+        dry_run: bool,
     },
 
     /// Configure Codex MCP integration
-    InstallCodex,
+    InstallCodex {
+        /// Explicit project path for MCP args (defaults to current directory)
+        #[arg(long)]
+        project_path: Option<PathBuf>,
+
+        /// Preview planned config changes without writing files
+        #[arg(long)]
+        dry_run: bool,
+    },
 
     /// Configure OpenCode MCP integration
-    InstallOpencode,
+    InstallOpencode {
+        /// Explicit project path for MCP args (defaults to current directory)
+        #[arg(long)]
+        project_path: Option<PathBuf>,
+
+        /// Preview planned config changes without writing files
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 pub async fn run() -> Result<()> {
@@ -271,14 +295,25 @@ pub async fn run() -> Result<()> {
         Commands::Doctor => crate::cli::doctor::run().await,
         Commands::Setup { model } => crate::cli::setup::run(model).await,
         Commands::Mcp { path } => crate::mcp::run_mcp_server(path).await,
-        Commands::InstallClaudeCode { global } => crate::cli::install_claude_code::run(global),
-        Commands::InstallCodex => crate::cli::install_codex::run(),
-        Commands::InstallOpencode => crate::cli::install_opencode::run(),
+        Commands::InstallClaudeCode {
+            global,
+            project_path,
+            dry_run,
+        } => crate::cli::install_claude_code::run(global, project_path, dry_run),
+        Commands::InstallCodex {
+            project_path,
+            dry_run,
+        } => crate::cli::install_codex::run(project_path, dry_run),
+        Commands::InstallOpencode {
+            project_path,
+            dry_run,
+        } => crate::cli::install_opencode::run(project_path, dry_run),
     }
 }
 
 mod doctor;
 mod install_claude_code;
 mod install_codex;
+mod install_common;
 mod install_opencode;
 mod setup;

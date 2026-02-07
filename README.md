@@ -13,7 +13,7 @@ Search your codebase using natural language queries like *"where do we handle au
 - **Context Windows** — Shows surrounding code (3 lines before/after) for better understanding
 - **Local & Private** — All processing happens locally using ONNX models, no data leaves your machine
 - **Fast** — Sub-second search after initial model load, incremental indexing
-- **Multiple Interfaces** — CLI, HTTP server, and MCP server for Claude Code integration
+- **Multiple Interfaces** — CLI, HTTP server, and MCP server for coding-agent integration (Codex, Claude Code, OpenCode)
 
 ---
 
@@ -31,9 +31,12 @@ Search your codebase using natural language queries like *"where do we handle au
   - [list](#list)
   - [doctor](#doctor)
   - [setup](#setup)
+  - [install-claude-code](#install-claude-code)
+  - [install-codex](#install-codex)
+  - [install-opencode](#install-opencode)
 - [Global Options](#global-options)
 - [Search Modes](#search-modes)
-- [MCP Server (Claude Code)](#mcp-server-claude-code-integration)
+- [MCP Server (Coding Agents)](#mcp-server-coding-agent-integration)
 - [HTTP Server API](#http-server-api)
 - [Database Management](#database-management)
 - [Supported Languages](#supported-languages)
@@ -55,7 +58,7 @@ curl -sSL https://raw.githubusercontent.com/nahuelcio/demongrep/main/install.sh 
 ```
 
 This automatically:
-- Detects your OS (Linux, macOS, Windows)
+- Detects your OS (Linux, macOS)
 - Downloads the appropriate pre-built binary
 - Installs to `/usr/local/bin/` (or equivalent on Windows)
 - Sets up PATH if needed
@@ -68,7 +71,8 @@ Download pre-built binaries directly from [GitHub Releases](https://github.com/n
 - Linux x86_64
 - macOS x86_64
 - macOS ARM64 (Apple Silicon)
-- Windows x64
+
+Windows pre-built release binaries are not published in this version.
 
 **Steps:**
 1. Go to https://github.com/nahuelcio/demongrep/releases
@@ -138,36 +142,67 @@ demongrep --version
 demongrep doctor  # Check system health
 ```
 
-### Claude Code Integration
+### Setup (Recommended)
 
-To integrate demongrep with Claude Code as an MCP server:
+Pre-download and validate the embedding model before your first index/search:
 
 ```bash
-demongrep install-claude-code
+demongrep setup
 ```
 
-This command:
-- Configures the MCP server in Claude Code's settings
-- Sets up automatic indexing for your projects
-- Enables semantic search in Claude Code
+Then:
 
-For manual setup, see [MCP Server section](#mcp-server-claude-code-integration).
+```bash
+demongrep index
+demongrep search "where do we handle authentication?"
+```
+
+### Coding Agent Integration
+
+Configure demongrep as an MCP server for your coding agent:
+
+```bash
+# Claude Code
+demongrep install-claude-code --project-path /absolute/path/to/project
+
+# Codex
+demongrep install-codex --project-path /absolute/path/to/project
+
+# OpenCode
+demongrep install-opencode --project-path /absolute/path/to/project
+```
+
+Useful flags:
+- `--project-path <PATH>`: write an explicit project path in MCP args
+- `--dry-run`: preview config changes without writing files
+
+Detailed setup and troubleshooting:
+- `docs/agents/claude-code.md`
+- `docs/agents/codex.md`
+- `docs/agents/opencode.md`
+- `docs/agents/troubleshooting.md`
 
 ---
 
 ## Quick Start
 
 ```bash
-# 1. Navigate to your project
+# 1. Install demongrep
+curl -sSL https://raw.githubusercontent.com/nahuelcio/demongrep/main/install.sh | bash
+
+# 2. Set up model cache (recommended)
+demongrep setup
+
+# 3. Navigate to your project
 cd /path/to/your/project
 
-# 2. Index the codebase (first time only, ~30-60s for medium projects)
+# 4. Index the codebase (first time only, ~30-60s for medium projects)
 demongrep index
 
-# 3. Search with natural language
+# 5. Search with natural language
 demongrep search "where do we handle authentication?"
 
-# 4. Search with better accuracy (slower)
+# 6. Search with better accuracy (slower)
 demongrep search "error handling" --rerank
 ```
 
@@ -322,7 +357,7 @@ The server automatically re-indexes files when they change (with 300ms debouncin
 
 ### mcp
 
-Start an MCP (Model Context Protocol) server for Claude Code integration.
+Start an MCP (Model Context Protocol) server for coding-agent integration.
 
 ```bash
 demongrep mcp [PATH]
@@ -334,7 +369,7 @@ demongrep mcp [PATH]
 |----------|-------------|
 | `[PATH]` | Path to project (defaults to current directory) |
 
-See [MCP Server section](#mcp-server-claude-code-integration) for detailed setup.
+See [MCP Server section](#mcp-server-coding-agent-integration) for detailed setup.
 
 ---
 
@@ -431,6 +466,32 @@ demongrep setup [OPTIONS]
 
 ---
 
+### install-claude-code
+
+Configure Claude Code MCP integration.
+
+```bash
+demongrep install-claude-code [--project-path PATH] [--dry-run]
+```
+
+### install-codex
+
+Configure Codex MCP integration.
+
+```bash
+demongrep install-codex [--project-path PATH] [--dry-run]
+```
+
+### install-opencode
+
+Configure OpenCode MCP integration.
+
+```bash
+demongrep install-opencode [--project-path PATH] [--dry-run]
+```
+
+---
+
 ## Global Options
 
 These options work with all commands:
@@ -485,9 +546,9 @@ demongrep search "query" --rerank
 
 ---
 
-## MCP Server (Claude Code Integration)
+## MCP Server (Coding Agent Integration)
 
-demongrep can act as an MCP server, allowing Claude Code to search your codebase.
+demongrep can act as an MCP server, allowing coding agents to search your codebase.
 
 ### Setup
 
@@ -503,9 +564,17 @@ demongrep can act as an MCP server, allowing Claude Code to search your codebase
    demongrep index
    ```
 
-3. **Configure Claude Code**
+3. **Configure your coding agent**
 
-   Edit `~/.config/claude-code/config.json` (Linux/Mac) or the appropriate config location:
+   Run one of the built-in install commands:
+
+   ```bash
+   demongrep install-claude-code --project-path /absolute/path/to/your/project
+   demongrep install-codex --project-path /absolute/path/to/your/project
+   demongrep install-opencode --project-path /absolute/path/to/your/project
+   ```
+
+   Or configure manually, for example:
 
    ```json
    {
@@ -518,7 +587,7 @@ demongrep can act as an MCP server, allowing Claude Code to search your codebase
    }
    ```
 
-4. **Restart Claude Code**
+4. **Restart your coding agent**
 
 ### Available MCP Tools
 
@@ -528,9 +597,9 @@ demongrep can act as an MCP server, allowing Claude Code to search your codebase
 | `get_file_chunks` | `path` | Get all indexed chunks from a file |
 | `index_status` | | Check if index exists and get stats |
 
-### Example MCP Usage in Claude Code
+### Example MCP Usage in Coding Agents
 
-Once configured, Claude Code can use commands like:
+Once configured, your coding agent can use commands like:
 - *"Search for authentication handling"*
 - *"Find all chunks in src/auth.rs"*
 - *"Check if the index is ready"*

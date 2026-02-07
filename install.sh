@@ -101,11 +101,9 @@ detect_os() {
         Darwin*)
             echo "macos"
             ;;
-        MINGW*|MSYS*|CYGWIN*)
-            echo "windows"
-            ;;
         *)
             log_error "Unsupported operating system: $(uname -s)"
+            log_info "Supported operating systems: Linux x86_64, macOS x86_64, macOS aarch64"
             exit 1
             ;;
     esac
@@ -382,8 +380,9 @@ main() {
     
     log_info "Version to install: v${version}"
     
-    # Construct download URL
-    local download_url="${RELEASE_BASE_URL}/v${version}/demongrep-${version}-${target}.tar.gz"
+    # Construct download URLs (current + legacy naming)
+    local download_url="${RELEASE_BASE_URL}/v${version}/demongrep-v${version}-${target}.tar.gz"
+    local fallback_download_url="${RELEASE_BASE_URL}/v${version}/demongrep-${version}-${target}.tar.gz"
     log_info "Download URL: $download_url"
     
     # Create temporary directory
@@ -393,8 +392,11 @@ main() {
     # Download
     local archive="$TEMP_DIR/demongrep-${version}.tar.gz"
     if ! download_file "$download_url" "$archive"; then
-        log_error "Installation failed: could not download demongrep"
-        exit 1
+        log_warning "Primary download URL failed, trying legacy asset naming..."
+        if ! download_file "$fallback_download_url" "$archive"; then
+            log_error "Installation failed: could not download demongrep"
+            exit 1
+        fi
     fi
     
     # Verify archive
@@ -447,7 +449,10 @@ main() {
     if [[ ":$PATH:" == *":$install_dir:"* ]]; then
         log_info "demongrep is available in your PATH"
         echo ""
-        log_info "You can now run: ${GREEN}demongrep${NC}"
+        log_info "Quick start:"
+        log_info "  1. ${GREEN}demongrep setup${NC}"
+        log_info "  2. ${GREEN}demongrep index${NC}"
+        log_info "  3. ${GREEN}demongrep search \"where do we handle authentication?\"${NC}"
     else
         log_warning "Installation directory is not in your PATH"
         echo ""
@@ -457,6 +462,11 @@ main() {
         echo ""
         log_info "To add to PATH, add this line to your shell profile (~/.bashrc, ~/.zshrc, etc.):"
         log_info "    ${GREEN}export PATH=\"\$PATH:$install_dir\"${NC}"
+        echo ""
+        log_info "Then run:"
+        log_info "  1. ${GREEN}demongrep setup${NC}"
+        log_info "  2. ${GREEN}demongrep index${NC}"
+        log_info "  3. ${GREEN}demongrep search \"where do we handle authentication?\"${NC}"
     fi
     
     echo ""

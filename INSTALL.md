@@ -8,6 +8,12 @@ The easiest way to install demongrep is using the provided installation script:
 curl -sSL https://raw.githubusercontent.com/nahuelcio/demongrep/main/install.sh | bash
 ```
 
+Then run the recommended first-use setup:
+
+```bash
+demongrep setup
+```
+
 ## Installation Methods
 
 ### Method 1: Automated Installation (Recommended)
@@ -160,6 +166,33 @@ bash install.sh [OPTIONS]
 | Linux | x86_64 | ✓ Supported |
 | macOS | x86_64 (Intel) | ✓ Supported |
 | macOS | aarch64 (Apple Silicon) | ✓ Supported |
+
+## Coding Agent Integration
+
+After installation, you can configure MCP integration for supported coding agents:
+
+```bash
+# Claude Code
+demongrep install-claude-code --project-path /absolute/path/to/project
+
+# Codex
+demongrep install-codex --project-path /absolute/path/to/project
+
+# OpenCode
+demongrep install-opencode --project-path /absolute/path/to/project
+```
+
+Validate setup:
+
+```bash
+demongrep doctor
+```
+
+Troubleshooting guides:
+- `docs/agents/claude-code.md`
+- `docs/agents/codex.md`
+- `docs/agents/opencode.md`
+- `docs/agents/troubleshooting.md`
 
 ## Uninstalling
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Demongrep Agent Workflows"
+  short_description: "Install and debug demongrep agent MCP setup"
+  default_prompt: "Use $demongrep-agent-workflows to set up demongrep MCP for Codex, Claude Code, or OpenCode and validate it with doctor."
