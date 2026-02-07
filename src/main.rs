@@ -30,9 +30,10 @@ async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let is_quiet = args.iter().any(|a| a == "-q" || a == "--quiet");
     let is_json = args.iter().any(|a| a == "--json");
+    let is_agent = args.iter().any(|a| a == "--agent");
 
-    // Skip tracing in quiet mode or JSON output
-    if !is_quiet && !is_json {
+    // Skip tracing in quiet mode, JSON output, or agent mode
+    if !is_quiet && !is_json && !is_agent {
         // Initialize tracing
         tracing_subscriber::registry()
             .with(

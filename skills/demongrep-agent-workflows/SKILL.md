@@ -1,35 +1,100 @@
 ---
 name: demongrep-agent-workflows
-description: Setup, verify, and troubleshoot demongrep MCP integration for Codex, Claude Code, and OpenCode. Use when users ask how to install demongrep for coding agents, configure MCP, validate integration, or recover from integration failures.
+description: Semantic code search with demongrep. Use alongside grep/rg: grep for exact text, demongrep for concepts. Also use for setup and troubleshooting in Codex, Claude Code, and OpenCode.
 ---
 
-# demongrep Agent Workflows
+# What demongrep does
 
-Use this skill when a user asks for demongrep integration with Codex, Claude Code, or OpenCode.
+Finds code by meaning.  
+Use this skill when users ask questions like:
+- "Where do we handle auth?"
+- "Where is this validated?"
+- "What code orchestrates retries?"
 
-## Workflow
+Use both tools:
+- `rg`/`grep`: exact string or symbol match
+- `demongrep`: concept match and semantic discovery
 
-1. Confirm demongrep is installed.
-2. Confirm the project path that should be indexed.
-3. Run `demongrep setup` to warm model cache.
-4. Run indexing if needed.
-5. Run the matching install command.
-6. Run `demongrep doctor` and resolve failures.
-7. Ask the user to restart the coding agent.
-
-## Agent Selection
-
-- For Codex requests, read `references/codex.md`.
-- For Claude Code requests, read `references/claude-code.md`.
-- For OpenCode requests, read `references/opencode.md`.
-- For any setup errors, read `references/troubleshooting.md`.
-
-## Canonical Commands
+# Primary commands
 
 ```bash
-demongrep install-claude-code --project-path /absolute/path/to/project
-demongrep install-codex --project-path /absolute/path/to/project
-demongrep install-opencode --project-path /absolute/path/to/project
+# Semantic search
+demongrep search "where do we validate user permissions"
+
+# Agent-optimized output
+demongrep search --agent "where do we validate user permissions"
+
+# JSON output for pipelines/tools
+demongrep search --json --quiet "authentication flow"
 ```
 
-Use `--dry-run` first when you need to preview config changes safely.
+# Setup and integration workflow
+
+1. Confirm installation:
+```bash
+demongrep --version
+```
+2. Warm model cache:
+```bash
+demongrep setup
+```
+3. Build/update index:
+```bash
+demongrep index
+```
+4. Validate environment:
+```bash
+demongrep doctor
+```
+5. Configure agent integration:
+```bash
+demongrep install-codex
+demongrep install-claude-code
+demongrep install-opencode
+```
+6. Tell the user to restart the agent application.
+
+If a specific project must be pinned, use:
+```bash
+demongrep install-codex --project-path /absolute/path/to/project
+```
+
+Use `--dry-run` first when you need a safe preview of config changes.
+
+# Architecture workflow for agents
+
+1. Start semantic:
+```bash
+demongrep search "where do requests enter the server"
+```
+2. Narrow by area:
+```bash
+demongrep search "jwt validation" --filter-path src/auth
+```
+3. Increase precision when needed:
+```bash
+demongrep search "permission checks in handlers" --rerank
+```
+4. Use compact mode when only file locations are needed:
+```bash
+demongrep search "authentication middleware" --compact
+```
+
+# Output guidance
+
+- Prioritize high-score results first.
+- Prefer focused reads over full-file reads.
+- Combine demongrep results with `rg` for exact follow-up.
+
+# Failure handling
+
+- If setup/model fails: run `demongrep doctor` and use `references/troubleshooting.md`.
+- If integration fails: rerun install command with `--dry-run`, then without it.
+- If results look stale: run `demongrep search "query" --sync`.
+
+# Agent-specific references
+
+- Codex: `references/codex.md`
+- Claude Code: `references/claude-code.md`
+- OpenCode: `references/opencode.md`
+- Troubleshooting: `references/troubleshooting.md`

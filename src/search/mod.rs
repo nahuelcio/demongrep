@@ -162,7 +162,20 @@ pub async fn search(
 
         // Load this database
         let start = Instant::now();
-        let store = VectorStore::new(&db_path, dimensions)?;
+        let mut store = VectorStore::new(&db_path, dimensions)?;
+        let stats = store.stats()?;
+        if stats.total_chunks == 0 {
+            continue;
+        }
+        if !stats.indexed {
+            if !json {
+                println!(
+                    "{}",
+                    "⚠️  Vector index missing, rebuilding automatically...".yellow()
+                );
+            }
+            store.build_index()?;
+        }
         total_load_duration += start.elapsed();
 
         // Search in this database
@@ -479,7 +492,7 @@ pub fn sync_database(db_path: &PathBuf, model_type: ModelType) -> Result<()> {
         }
 
         changes += 1;
-        println!("  📝 {}", file.path.display());
+        crate::info_print!("  📝 {}", file.path.display());
 
         // Delete old chunks
         if !old_chunk_ids.is_empty() {
@@ -509,7 +522,7 @@ pub fn sync_database(db_path: &PathBuf, model_type: ModelType) -> Result<()> {
     let deleted_files = file_meta.find_deleted_files();
     for (path, chunk_ids) in &deleted_files {
         changes += 1;
-        println!("  🗑️  {} (deleted)", path);
+        crate::info_print!("  🗑️  {} (deleted)", path);
         if !chunk_ids.is_empty() {
             store.delete_chunks(chunk_ids)?;
         }
@@ -518,12 +531,12 @@ pub fn sync_database(db_path: &PathBuf, model_type: ModelType) -> Result<()> {
 
     // Rebuild index if changes were made
     if changes > 0 {
-        println!("  🔨 Rebuilding index...");
+        crate::info_print!("  🔨 Rebuilding index...");
         store.build_index()?;
         file_meta.save(db_path)?;
-        println!("  ✅ {} file(s) synced", changes);
+        crate::info_print!("  ✅ {} file(s) synced", changes);
     } else {
-        println!("  ✅ Already up to date");
+        crate::info_print!("  ✅ Already up to date");
     }
 
     Ok(())
