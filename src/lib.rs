@@ -24,7 +24,7 @@ pub use config::Config;
 pub use error::DemongrepError;
 pub use file::{FileInfo, FileWalker, Language, WalkStats};
 pub use chunker::{Chunk, ChunkKind, Chunker};
-pub use embed::{EmbeddingService, EmbeddedChunk, ModelType, CacheStats};
+pub use embed::{EmbeddingService, EmbeddedChunk, ModelType, CacheStats, FastEmbedder};
 pub use vectordb::{VectorStore, SearchResult, StoreStats};
 pub use fts::{FtsStore, FtsResult};
 pub use database::{DatabaseManager, Database, DatabaseType, CombinedStats};
