@@ -153,12 +153,12 @@ get_target_triple() {
 get_latest_version() {
     if command -v curl &> /dev/null; then
         local response
-        response=$(curl -sSL "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest" 2>/dev/null || true)
+        response=$(curl -sSL --connect-timeout 5 --max-time 10 "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest" 2>/dev/null || true)
         
         # Check if response contains a valid tag_name
         if echo "$response" | grep -q '"tag_name"'; then
             # Extract version without 'v' prefix
-            echo "$response" | grep -o '"tag_name":"[^"]*' | cut -d'"' -f4 | sed 's/^v//'
+            echo "$response" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\(v\{0,1\}[^"]*\)".*/\1/p' | head -n 1 | sed 's/^v//'
         else
             log_warning "Could not fetch latest version from GitHub API, using 'latest' tag"
             echo "latest"
