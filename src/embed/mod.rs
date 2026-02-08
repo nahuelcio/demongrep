@@ -75,6 +75,18 @@ impl EmbeddingService {
         guard.embed_one(query)
     }
 
+    /// Embed a code snippet as a passage (for code-to-code similarity search).
+    /// Uses the same "Code:\n" prefix as chunk embeddings so the query lives
+    /// in the same embedding space as indexed code.
+    pub fn embed_code_snippet(&mut self, code: &str) -> Result<Vec<f32>> {
+        let prepared = format!("Code:\n{}", code);
+        let embedder_arc = &self.cached_embedder.batch_embedder.embedder;
+        let mut guard = embedder_arc
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Embedding mutex poisoned: {}", e))?;
+        guard.embed_one(&prepared)
+    }
+
     /// Get embedding dimensions
     pub fn dimensions(&self) -> usize {
         self.cached_embedder.dimensions()

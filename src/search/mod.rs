@@ -38,6 +38,16 @@ struct JsonResult {
     context_prev: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     context_next: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    vector_score: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fts_score: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    vector_rank: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fts_rank: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rerank_score: Option<f32>,
 }
 
 #[derive(Serialize)]
@@ -98,7 +108,12 @@ pub async fn search(
     rerank: bool,
     rerank_top: usize,
     kind_filter: Option<String>,
+    code_mode: bool,
+    explain: bool,
 ) -> Result<()> {
+    // --explain implies --scores
+    let scores = scores || explain;
+
     // Use local project database only
     let db_path = get_local_search_db_path(path.clone())?;
     let project_root = path
@@ -142,9 +157,13 @@ pub async fn search(
     let mut embedding_service = EmbeddingService::with_model_and_db(model_type, &db_path)?;
     model_load_duration = start.elapsed();
 
-    // Embed query once
+    // Embed query once (code mode uses passage embedding for code-to-code search)
     let start = Instant::now();
-    let query_embedding = embedding_service.embed_query(query)?;
+    let query_embedding = if code_mode {
+        embedding_service.embed_code_snippet(query)?
+    } else {
+        embedding_service.embed_query(query)?
+    };
     total_embed_duration = start.elapsed();
 
     // Perform sync if requested
@@ -213,9 +232,17 @@ pub async fn search(
         if let Some(result) = chunk_id_to_result.get(&fused.chunk_id) {
             let mut r = (*result).clone();
             r.score = fused.rrf_score;
+            r.vector_score = fused.vector_score;
+            r.fts_score = fused.fts_score;
+            r.vector_rank = fused.vector_rank;
+            r.fts_rank = fused.fts_rank;
             all_results.push(r);
         } else if let Ok(Some(mut result)) = store.get_chunk_as_result(fused.chunk_id) {
             result.score = fused.rrf_score;
+            result.vector_score = fused.vector_score;
+            result.fts_score = fused.fts_score;
+            result.vector_rank = fused.vector_rank;
+            result.fts_rank = fused.fts_rank;
             all_results.push(result);
         }
     }
@@ -263,6 +290,7 @@ pub async fn search(
                             Vec::with_capacity(results.len());
                         for (idx, score) in reranked {
                             let mut result = results[idx].clone();
+                            result.rerank_score = Some(score);
                             result.score = score;
                             reordered.push(result);
                         }
@@ -322,6 +350,11 @@ pub async fn search(
                 signature: r.signature.clone(),
                 context_prev: r.context_prev.clone(),
                 context_next: r.context_next.clone(),
+                vector_score: if explain { r.vector_score } else { None },
+                fts_score: if explain { r.fts_score } else { None },
+                vector_rank: if explain { r.vector_rank } else { None },
+                fts_rank: if explain { r.fts_rank } else { None },
+                rerank_score: if explain { r.rerank_score } else { None },
             })
             .collect();
 
@@ -445,13 +478,13 @@ pub async fn search(
             file_results.truncate(per_file);
 
             for (idx, result) in file_results.iter().enumerate() {
-                print_result(result, idx == 0, content, scores)?;
+                print_result(result, idx == 0, content, scores, explain)?;
             }
         }
     } else {
         // Show all results
         for result in &paginated_results {
-            print_result(result, true, content, scores)?;
+            print_result(result, true, content, scores, explain)?;
         }
     }
 
@@ -541,6 +574,7 @@ fn print_result(
     show_file: bool,
     show_content: bool,
     show_scores: bool,
+    explain: bool,
 ) -> Result<()> {
     if show_file {
         println!("{}", "─".repeat(60));
@@ -562,23 +596,43 @@ fn print_result(
 
     // Show score if requested
     if show_scores {
-        let score_color = if result.score > 0.8 {
-            "green"
-        } else if result.score > 0.6 {
-            "yellow"
-        } else {
-            "red"
-        };
-
-        let score_text = format!("   Score: {:.3}", result.score);
-        println!(
-            "{}",
-            match score_color {
-                "green" => score_text.green(),
-                "yellow" => score_text.yellow(),
-                _ => score_text.red(),
+        if explain {
+            println!("   {}", "Score Breakdown:".bright_yellow());
+            println!("   Final: {:.4}", result.score);
+            if let Some(vs) = result.vector_score {
+                let rank_str = result
+                    .vector_rank
+                    .map_or("N/A".to_string(), |r| format!("#{}", r));
+                println!("   ├─ Vector: {:.4} (rank {})", vs, rank_str);
             }
-        );
+            if let Some(fs) = result.fts_score {
+                let rank_str = result
+                    .fts_rank
+                    .map_or("N/A".to_string(), |r| format!("#{}", r));
+                println!("   ├─ FTS:    {:.4} (rank {})", fs, rank_str);
+            }
+            if let Some(rs) = result.rerank_score {
+                println!("   └─ Rerank: {:.4}", rs);
+            }
+        } else {
+            let score_color = if result.score > 0.8 {
+                "green"
+            } else if result.score > 0.6 {
+                "yellow"
+            } else {
+                "red"
+            };
+
+            let score_text = format!("   Score: {:.3}", result.score);
+            println!(
+                "{}",
+                match score_color {
+                    "green" => score_text.green(),
+                    "yellow" => score_text.yellow(),
+                    _ => score_text.red(),
+                }
+            );
+        }
     }
 
     // Show context if available

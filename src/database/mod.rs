@@ -276,11 +276,19 @@ impl DatabaseManager {
                 if let Some(result) = chunk_id_to_result.get(&fused.chunk_id) {
                     let mut r = (*result).clone();
                     r.score = fused.rrf_score;
+                    r.vector_score = fused.vector_score;
+                    r.fts_score = fused.fts_score;
+                    r.vector_rank = fused.vector_rank;
+                    r.fts_rank = fused.fts_rank;
                     all_results.push(r);
                 } else if let Ok(Some(mut result)) =
                     database.store.get_chunk_as_result(fused.chunk_id)
                 {
                     result.score = fused.rrf_score;
+                    result.vector_score = fused.vector_score;
+                    result.fts_score = fused.fts_score;
+                    result.vector_rank = fused.vector_rank;
+                    result.fts_rank = fused.fts_rank;
                     all_results.push(result);
                 }
             }

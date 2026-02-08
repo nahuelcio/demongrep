@@ -1,9 +1,11 @@
 use anyhow::Result;
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
+use rayon::prelude::*;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 use crate::chunker::SemanticChunker;
@@ -438,8 +440,6 @@ pub async fn index(
     println!("{}", "-".repeat(60));
 
     let start = Instant::now();
-    let mut chunker = SemanticChunker::new(100, 2000, 10);
-    let mut all_chunks = Vec::new();
 
     let pb = ProgressBar::new(files_to_index.len() as u64);
     pb.set_style(
@@ -449,31 +449,33 @@ pub async fn index(
             .progress_chars("█▓▒░ "),
     );
 
-    let mut skipped_files = 0;
-    for (file, _old_chunk_ids) in &files_to_index {
-        pb.set_message(format!(
-            "{}",
-            file.path.file_name().unwrap().to_string_lossy()
-        ));
+    let skipped_files = AtomicUsize::new(0);
+    let all_chunks: Vec<crate::chunker::Chunk> = files_to_index
+        .par_iter()
+        .flat_map(|(file, _old_chunk_ids)| {
+            pb.inc(1);
 
-        // Skip files that aren't valid UTF-8
-        let source_code = match std::fs::read_to_string(&file.path) {
-            Ok(content) => content,
-            Err(_) => {
-                skipped_files += 1;
-                pb.inc(1);
-                continue;
-            }
-        };
+            // Each thread gets its own chunker (tree-sitter parser has internal state)
+            let mut chunker = SemanticChunker::new(100, 2000, 10);
 
-        let chunks = chunker.chunk_semantic(file.language, &file.path, &source_code)?;
-        all_chunks.extend(chunks);
+            // Skip files that aren't valid UTF-8
+            let source_code = match std::fs::read_to_string(&file.path) {
+                Ok(content) => content,
+                Err(_) => {
+                    skipped_files.fetch_add(1, Ordering::Relaxed);
+                    return vec![];
+                }
+            };
 
-        pb.inc(1);
-    }
+            chunker
+                .chunk_semantic(file.language, &file.path, &source_code)
+                .unwrap_or_default()
+        })
+        .collect();
 
-    if skipped_files > 0 {
-        println!("   ⚠️  Skipped {} files (invalid UTF-8)", skipped_files);
+    let skipped_count = skipped_files.load(Ordering::Relaxed);
+    if skipped_count > 0 {
+        println!("   ⚠️  Skipped {} files (invalid UTF-8)", skipped_count);
     }
 
     pb.finish_with_message("Done!");

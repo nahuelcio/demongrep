@@ -135,6 +135,11 @@ mod tests {
             score,
             context_prev: None,
             context_next: None,
+            vector_score: None,
+            fts_score: None,
+            vector_rank: None,
+            fts_rank: None,
+            rerank_score: None,
         }
     }
 

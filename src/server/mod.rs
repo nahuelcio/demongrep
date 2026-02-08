@@ -226,6 +226,16 @@ struct SearchResult {
     kind: String,
     score: f32,
     database: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    vector_score: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fts_score: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    vector_rank: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fts_rank: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rerank_score: Option<f32>,
 }
 
 /// Health check response
@@ -816,9 +826,14 @@ async fn search_handler(
                 content: truncate_content(&r.content, 200),
                 start_line: r.start_line,
                 end_line: r.end_line,
-                kind: r.kind,
+                kind: r.kind.clone(),
                 score: r.score,
                 database,
+                vector_score: r.vector_score,
+                fts_score: r.fts_score,
+                vector_rank: r.vector_rank,
+                fts_rank: r.fts_rank,
+                rerank_score: r.rerank_score,
             }
         })
         .collect();

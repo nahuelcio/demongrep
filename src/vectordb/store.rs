@@ -289,6 +289,11 @@ impl VectorStore {
                     score: 1.0 - distance, // Convert distance to similarity score
                     context_prev: metadata.context_prev,
                     context_next: metadata.context_next,
+                    vector_score: None,
+                    fts_score: None,
+                    vector_rank: None,
+                    fts_rank: None,
+                    rerank_score: None,
                 });
             }
         }
@@ -457,6 +462,11 @@ impl VectorStore {
                 score: 0.0, // Will be set by caller
                 context_prev: meta.context_prev,
                 context_next: meta.context_next,
+                vector_score: None,
+                fts_score: None,
+                vector_rank: None,
+                fts_rank: None,
+                rerank_score: None,
             }))
         } else {
             Ok(None)
@@ -494,6 +504,16 @@ pub struct SearchResult {
     pub context_prev: Option<String>,
     /// Lines of code immediately after this chunk (for context)
     pub context_next: Option<String>,
+    /// Explain mode: original vector similarity score
+    pub vector_score: Option<f32>,
+    /// Explain mode: original FTS/BM25 score
+    pub fts_score: Option<f32>,
+    /// Explain mode: rank in vector search results (1-indexed)
+    pub vector_rank: Option<usize>,
+    /// Explain mode: rank in FTS search results (1-indexed)
+    pub fts_rank: Option<usize>,
+    /// Explain mode: neural reranker blended score
+    pub rerank_score: Option<f32>,
 }
 
 /// Statistics about the vector store

@@ -102,6 +102,14 @@ pub enum Commands {
         /// Optimized output for coding agents (combines --json --quiet --sync --content -m 10)
         #[arg(long)]
         agent: bool,
+
+        /// Treat query as a code snippet for code-to-code similarity search
+        #[arg(long)]
+        code: bool,
+
+        /// Show score breakdown per result (vector, FTS, RRF, rerank scores)
+        #[arg(long)]
+        explain: bool,
     },
 
     /// Index the repository
@@ -263,6 +271,8 @@ pub async fn run() -> Result<()> {
             filter_path,
             kind,
             agent,
+            code,
+            explain,
         } => {
             // --agent mode: override flags for optimized agent output
             let (max_results, content, sync, json) = if agent {
@@ -294,6 +304,8 @@ pub async fn run() -> Result<()> {
                 rerank,
                 rerank_top,
                 kind,
+                code,
+                explain,
             )
             .await
         }

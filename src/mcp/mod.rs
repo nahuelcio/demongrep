@@ -71,6 +71,16 @@ pub struct SearchResultItem {
     pub context_next: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub database: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vector_score: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fts_score: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vector_rank: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fts_rank: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rerank_score: Option<f32>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -218,6 +228,11 @@ impl DemongrepService {
                     context_prev: r.context_prev,
                     context_next: r.context_next,
                     database,
+                    vector_score: r.vector_score,
+                    fts_score: r.fts_score,
+                    vector_rank: r.vector_rank,
+                    fts_rank: r.fts_rank,
+                    rerank_score: r.rerank_score,
                 }
             })
             .collect();
@@ -268,6 +283,11 @@ impl DemongrepService {
                             context_prev: chunk.context_prev,
                             context_next: chunk.context_next,
                             database: Some(db_type.to_string()),
+                            vector_score: None,
+                            fts_score: None,
+                            vector_rank: None,
+                            fts_rank: None,
+                            rerank_score: None,
                         });
                     }
                 }
@@ -357,16 +377,21 @@ impl DemongrepService {
         let items: Vec<SearchResultItem> = results
             .into_iter()
             .map(|r| SearchResultItem {
-                path: r.path,
+                path: r.path.clone(),
                 start_line: r.start_line,
                 end_line: r.end_line,
-                kind: r.kind,
-                content: r.content,
+                kind: r.kind.clone(),
+                content: r.content.clone(),
                 score: r.score,
-                signature: r.signature,
-                context_prev: r.context_prev,
-                context_next: r.context_next,
+                signature: r.signature.clone(),
+                context_prev: r.context_prev.clone(),
+                context_next: r.context_next.clone(),
                 database: None,
+                vector_score: r.vector_score,
+                fts_score: r.fts_score,
+                vector_rank: r.vector_rank,
+                fts_rank: r.fts_rank,
+                rerank_score: r.rerank_score,
             })
             .collect();
 
@@ -469,6 +494,11 @@ impl DemongrepService {
                         context_prev: chunk.context_prev,
                         context_next: chunk.context_next,
                         database: Some(db_type.to_string()),
+                        vector_score: None,
+                        fts_score: None,
+                        vector_rank: None,
+                        fts_rank: None,
+                        rerank_score: None,
                     });
 
                     if definitions.len() >= limit {
