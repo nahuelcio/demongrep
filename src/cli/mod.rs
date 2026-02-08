@@ -230,6 +230,29 @@ pub enum Commands {
         #[arg(long)]
         dest: Option<PathBuf>,
     },
+
+    /// Benchmark embedding models (compare performance, quality, and memory)
+    Bench {
+        /// Comma-separated list of models to benchmark (default: all)
+        #[arg(long)]
+        models: Option<String>,
+
+        /// Maximum files to index for benchmark (default: 100)
+        #[arg(long)]
+        limit: Option<usize>,
+
+        /// Path to benchmark (defaults to current directory)
+        #[arg(long)]
+        path: Option<PathBuf>,
+
+        /// Output file for markdown report (default: benchmark_results.md)
+        #[arg(long)]
+        output: Option<PathBuf>,
+
+        /// Output results as JSON instead of table
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 pub async fn run() -> Result<()> {
@@ -340,6 +363,13 @@ pub async fn run() -> Result<()> {
             ref_name,
             dest,
         } => crate::cli::add_skills::run(skill, ref_name, dest),
+        Commands::Bench {
+            models,
+            limit,
+            path,
+            output,
+            json,
+        } => crate::bench::bench(models, limit, path, output, json).await,
     }
 }
 
