@@ -1,6 +1,6 @@
 [package]
 name = "demongrep"
-version = "0.1.54"
+version = "1.6.0"
 edition = "2021"
 authors = ["demongrep contributors"]
 license = "Apache-2.0"

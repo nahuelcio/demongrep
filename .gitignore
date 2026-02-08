@@ -30,3 +30,4 @@ criterion/
 /test-repos/
 ideas/analisis_mejoras.md
 .osgrep
+benchmark_*.md
