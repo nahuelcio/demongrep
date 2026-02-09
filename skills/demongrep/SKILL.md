@@ -17,6 +17,17 @@ Use this skill when the user asks to:
 - In terminal usage, demongrep runs via direct CLI (`demongrep search ...`).
 - CLI flags are not automatically available in MCP unless explicitly exposed by MCP tool schema.
 
+## Agent execution policy (important)
+
+When operating as a coding agent, keep tool usage strict and short:
+
+1. Start with exactly one `demongrep_hybrid_search` call.
+2. Use `limit` 8-12 and `per_file=1` for broad discovery.
+3. Use `demongrep_semantic_search` only if hybrid returns empty/weak results.
+4. Do not chain multiple search tools for the same query unless the user asks for deeper digging.
+5. Do not narrate internal reasoning ("Thinking..."). Return concise findings with file paths and line ranges.
+6. Only read full files after search when the user asks for full context or implementation details.
+
 ## Daily usage (CLI)
 
 Use these commands when the user asks to find code by meaning:

@@ -30,14 +30,22 @@ Expected entry:
 
 ```json
 {
-  "mcpServers": {
+  "mcp": {
     "demongrep": {
-      "command": "/absolute/path/to/demongrep",
-      "args": ["mcp", "/absolute/path/to/project"]
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "/absolute/path/to/demongrep",
+        "mcp",
+        "/absolute/path/to/project"
+      ]
     }
   }
 }
 ```
+
+Note: some OpenCode versions may still read legacy `mcpServers.demongrep`, but
+`demongrep install-opencode` writes the current `mcp.demongrep` format.
 
 ## Safe Preview
 

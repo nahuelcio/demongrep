@@ -14,6 +14,7 @@ use rmcp::{
     tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -26,6 +27,9 @@ const MCP_MAX_LIMIT: usize = 20;
 const MCP_CONTENT_CHAR_LIMIT: usize = 420;
 const MCP_DEFAULT_RERANK_TOP: usize = 50;
 const MCP_MAX_RERANK_TOP: usize = 200;
+const MCP_DEFAULT_PER_FILE: usize = 1;
+const MCP_MAX_PER_FILE: usize = 5;
+const MCP_MAX_CANDIDATE_LIMIT: usize = 100;
 
 /// Demongrep MCP service with dual-database support via DatabaseManager
 pub struct DemongrepService {
@@ -54,6 +58,8 @@ pub struct SemanticSearchRequest {
     pub limit: Option<usize>,
     /// Offset for pagination (default: 0)
     pub offset: Option<usize>,
+    /// Maximum matches per file (default: 1, max: 5)
+    pub per_file: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -106,6 +112,8 @@ pub struct HybridSearchRequest {
     pub rerank: Option<bool>,
     /// Number of top candidates to rerank (default: 50, max: 200)
     pub rerank_top: Option<usize>,
+    /// Maximum matches per file (default: 1, max: 5)
+    pub per_file: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -183,6 +191,47 @@ impl DemongrepService {
             .clamp(1, MCP_MAX_RERANK_TOP)
     }
 
+    fn normalize_per_file(per_file: Option<usize>) -> usize {
+        per_file
+            .unwrap_or(MCP_DEFAULT_PER_FILE)
+            .clamp(1, MCP_MAX_PER_FILE)
+    }
+
+    fn normalize_candidate_limit(limit: usize, per_file: usize) -> usize {
+        limit
+            .saturating_mul(per_file)
+            .saturating_mul(4)
+            .clamp(limit, MCP_MAX_CANDIDATE_LIMIT)
+    }
+
+    fn limit_results_per_file(
+        results: Vec<crate::vectordb::SearchResult>,
+        per_file: usize,
+        limit: usize,
+    ) -> Vec<crate::vectordb::SearchResult> {
+        if results.is_empty() {
+            return results;
+        }
+
+        let mut counts_by_path: HashMap<String, usize> = HashMap::new();
+        let mut filtered = Vec::with_capacity(limit.min(results.len()));
+
+        for result in results {
+            let count = counts_by_path.entry(result.path.clone()).or_insert(0);
+            if *count >= per_file {
+                continue;
+            }
+            *count += 1;
+            filtered.push(result);
+
+            if filtered.len() >= limit {
+                break;
+            }
+        }
+
+        filtered
+    }
+
     fn apply_optional_rerank(
         query: &str,
         mut results: Vec<crate::vectordb::SearchResult>,
@@ -242,6 +291,8 @@ impl DemongrepService {
     ) -> Result<CallToolResult, McpError> {
         let limit = Self::normalize_limit(request.limit);
         let offset = request.offset.unwrap_or(0);
+        let per_file = Self::normalize_per_file(request.per_file);
+        let candidate_limit = Self::normalize_candidate_limit(limit, per_file);
 
         // Get embedding service and embed query
         let mut service_guard = match self.get_embedding_service() {
@@ -266,7 +317,10 @@ impl DemongrepService {
         };
 
         // Search across all databases using DatabaseManager
-        let results = match self.db_manager.search_all(&query_embedding, limit, offset) {
+        let results = match self
+            .db_manager
+            .search_all(&query_embedding, candidate_limit, offset)
+        {
             Ok(r) => r,
             Err(e) => {
                 return Ok(CallToolResult::success(vec![Content::text(format!(
@@ -282,8 +336,11 @@ impl DemongrepService {
             )]));
         }
 
+        // Keep ranked diversity so broad queries are not dominated by a single file.
+        let diversified = Self::limit_results_per_file(results, per_file, limit);
+
         // Convert to response format
-        let items: Vec<SearchResultItem> = results
+        let items: Vec<SearchResultItem> = diversified
             .into_iter()
             .map(|r| {
                 // Determine which database this came from based on path
@@ -399,6 +456,8 @@ impl DemongrepService {
         let rrf_k = request.rrf_k.unwrap_or(20.0);
         let rerank = request.rerank.unwrap_or(false);
         let rerank_top = Self::normalize_rerank_top(request.rerank_top);
+        let per_file = Self::normalize_per_file(request.per_file);
+        let candidate_limit = Self::normalize_candidate_limit(limit, per_file);
 
         // Get embedding service and embed query
         let mut service_guard = match self.get_embedding_service() {
@@ -426,7 +485,7 @@ impl DemongrepService {
         let mut results = match self.db_manager.hybrid_search_all(
             &request.query,
             &query_embedding,
-            limit,
+            candidate_limit,
             offset,
             rrf_k,
         ) {
@@ -449,6 +508,7 @@ impl DemongrepService {
         }
 
         results = Self::apply_optional_rerank(&request.query, results, rerank, rerank_top);
+        results = Self::limit_results_per_file(results, per_file, limit);
 
         if results.is_empty() {
             return Ok(CallToolResult::success(vec![Content::text(
@@ -662,8 +722,9 @@ impl ServerHandler for DemongrepService {
             },
             instructions: Some(
                 "Demongrep is a semantic code search tool with dual-database support. \
-                 Keep calls compact: start with hybrid_search, use semantic_search only if needed, \
-                 and use index_status for diagnostics. Results are intentionally short to reduce context usage."
+                 Execution policy: start with one hybrid_search call, avoid chain-calling tools for the same query, \
+                 use semantic_search only if hybrid_search is empty, and use index_status only for diagnostics. \
+                 Do not narrate internal reasoning; return concise findings with file paths and line ranges."
                     .to_string(),
             ),
             ..Default::default()

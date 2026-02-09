@@ -11,13 +11,25 @@ If `doctor` reports failures, fix them first.
 
 ## 2. Verify your MCP config entry
 
-Each supported agent needs:
+Codex and Claude Code need:
 
 ```json
 "mcpServers": {
   "demongrep": {
     "command": "/absolute/path/to/demongrep",
     "args": ["mcp", "/absolute/path/to/project"]
+  }
+}
+```
+
+OpenCode needs:
+
+```json
+"mcp": {
+  "demongrep": {
+    "type": "local",
+    "enabled": true,
+    "command": ["/absolute/path/to/demongrep", "mcp", "/absolute/path/to/project"]
   }
 }
 ```

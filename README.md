@@ -645,14 +645,28 @@ demongrep can act as an MCP server, allowing coding agents to search your codeba
    }
    ```
 
+   For OpenCode, use the new schema:
+
+   ```json
+   {
+     "mcp": {
+       "demongrep": {
+         "type": "local",
+         "enabled": true,
+         "command": ["/absolute/path/to/demongrep", "mcp", "/absolute/path/to/your/project"]
+       }
+     }
+   }
+   ```
+
 4. **Restart your coding agent**
 
 ### Available MCP Tools
 
 | Tool | Parameters | Description |
 |------|------------|-------------|
-| `semantic_search` | `query`, `limit` | Search code semantically |
-| `get_file_chunks` | `path` | Get all indexed chunks from a file |
+| `hybrid_search` | `query`, `limit`, `offset`, `filter_path`, `rrf_k`, `rerank`, `rerank_top`, `per_file` | Primary search tool (vector + BM25 + RRF) |
+| `semantic_search` | `query`, `limit`, `offset`, `per_file` | Vector semantic search fallback |
 | `index_status` | | Check if index exists and get stats |
 
 ### Example MCP Usage in Coding Agents
