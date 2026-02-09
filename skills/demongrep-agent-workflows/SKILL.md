@@ -1,100 +1,90 @@
 ---
 name: demongrep-agent-workflows
-description: Semantic code search with demongrep. Use alongside grep/rg: grep for exact text, demongrep for concepts. Also use for setup and troubleshooting in Codex, Claude Code, and OpenCode.
+description: Install, configure, validate, and troubleshoot demongrep for coding agents (Codex, Claude Code, OpenCode). Standalone workflow with no external references.
 ---
 
-# What demongrep does
+# demongrep Agent Workflows
 
-Finds code by meaning.  
-Use this skill when users ask questions like:
-- "Where do we handle auth?"
-- "Where is this validated?"
-- "What code orchestrates retries?"
+Use this skill when the user asks to:
+- install demongrep for an agent
+- configure MCP integration
+- fix a broken integration
+- resolve version/path conflicts
 
-Use both tools:
-- `rg`/`grep`: exact string or symbol match
-- `demongrep`: concept match and semantic discovery
+## MCP vs CLI
 
-# Primary commands
+- In coding agents (OpenCode/Codex/Claude), demongrep runs via MCP tools (`demongrep_*`) through `demongrep mcp`.
+- In terminal usage, demongrep runs via direct CLI (`demongrep search ...`).
+- CLI flags are not automatically available in MCP unless explicitly exposed by MCP tool schema.
 
-```bash
-# Semantic search
-demongrep search "where do we validate user permissions"
+## Standard setup flow
 
-# Agent-optimized output
-demongrep search --agent "where do we validate user permissions"
-
-# JSON output for pipelines/tools
-demongrep search --json --quiet "authentication flow"
-```
-
-# Setup and integration workflow
-
-1. Confirm installation:
+1. Verify binary health:
 ```bash
 demongrep --version
+which -a demongrep
 ```
-2. Warm model cache:
+2. Prepare project index:
 ```bash
+cd /absolute/path/to/project
 demongrep setup
-```
-3. Build/update index:
-```bash
 demongrep index
 ```
-4. Validate environment:
+3. Install agent integration:
+```bash
+demongrep install-codex --project-path /absolute/path/to/project
+# or
+# demongrep install-claude-code --project-path /absolute/path/to/project
+# demongrep install-opencode --project-path /absolute/path/to/project
+```
+4. Validate:
 ```bash
 demongrep doctor
 ```
-5. Configure agent integration:
-```bash
-demongrep install-codex
-demongrep install-claude-code
-demongrep install-opencode
-```
-6. Tell the user to restart the agent application.
+5. Restart the agent app/process.
 
-If a specific project must be pinned, use:
-```bash
-demongrep install-codex --project-path /absolute/path/to/project
-```
+Use `--dry-run` first if you need a safe config preview.
 
-Use `--dry-run` first when you need a safe preview of config changes.
+## PATH and version hygiene
 
-# Architecture workflow for agents
+If multiple binaries appear in PATH, enforce one canonical binary first:
 
-1. Start semantic:
 ```bash
-demongrep search "where do requests enter the server"
-```
-2. Narrow by area:
-```bash
-demongrep search "jwt validation" --filter-path src/auth
-```
-3. Increase precision when needed:
-```bash
-demongrep search "permission checks in handlers" --rerank
-```
-4. Use compact mode when only file locations are needed:
-```bash
-demongrep search "authentication middleware" --compact
+which -a demongrep
+demongrep --version
 ```
 
-# Output guidance
+If needed, prefer release install path first:
 
-- Prioritize high-score results first.
-- Prefer focused reads over full-file reads.
-- Combine demongrep results with `rg` for exact follow-up.
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+hash -r
+which -a demongrep
+demongrep --version
+```
 
-# Failure handling
+## Troubleshooting playbook
 
-- If setup/model fails: run `demongrep doctor` and use `references/troubleshooting.md`.
-- If integration fails: rerun install command with `--dry-run`, then without it.
-- If results look stale: run `demongrep search "query" --sync`.
+1. Integration missing in agent:
+- rerun install command with explicit `--project-path`
+- run once with `--dry-run`, then apply real run
 
-# Agent-specific references
+2. Agent still behaves like old version:
+- re-check `which -a demongrep`
+- fix PATH order
+- restart agent process
 
-- Codex: `references/codex.md`
-- Claude Code: `references/claude-code.md`
-- OpenCode: `references/opencode.md`
-- Troubleshooting: `references/troubleshooting.md`
+3. OpenCode config schema mismatch:
+- support either legacy `mcpServers.demongrep` or new `mcp.demongrep`
+- rerun `demongrep install-opencode --project-path /absolute/path/to/project`
+
+4. Search relevance issues:
+- rebuild index with `demongrep index`
+- prefer hybrid MCP search tool
+- enable MCP rerank parameters when available
+
+## Expected completion criteria
+
+- `demongrep doctor` has no blocking failures
+- agent config includes a valid `demongrep` MCP entry
+- active binary/version matches intended installation path

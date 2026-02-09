@@ -263,6 +263,22 @@ determine_install_dir() {
         echo "$INSTALL_DIR"
         return 0
     fi
+
+    # If an existing user-local demongrep is already in PATH, upgrade in place.
+    local existing
+    existing=$(command -v demongrep 2>/dev/null || true)
+    if [ -n "$existing" ] && [ -f "$existing" ]; then
+        local existing_dir
+        existing_dir="$(dirname "$existing")"
+        case "$existing_dir" in
+            "$HOME/.cargo/bin"|"$HOME/.local/bin")
+                if [ -w "$existing_dir" ]; then
+                    echo "$existing_dir"
+                    return 0
+                fi
+                ;;
+        esac
+    fi
     
     # Try /usr/local/bin first (usually requires sudo)
     if [ -w "/usr/local/bin" ]; then
@@ -391,6 +407,46 @@ get_installed_version() {
     fi
 }
 
+warn_path_conflicts() {
+    local installed_path=$1
+    local install_dir=$2
+    local found_raw=""
+    local found=""
+    local active=""
+    local unique_count=0
+
+    if command -v which >/dev/null 2>&1; then
+        found_raw=$(which -a demongrep 2>/dev/null || true)
+    fi
+
+    if [ -z "$found_raw" ]; then
+        return 0
+    fi
+
+    # Deduplicate while preserving order
+    found=$(printf "%s\n" "$found_raw" | awk '!seen[$0]++')
+    active=$(printf "%s\n" "$found" | head -n1)
+    unique_count=$(printf "%s\n" "$found" | grep -c . || true)
+
+    if [ "${unique_count:-0}" -le 1 ]; then
+        return 0
+    fi
+
+    log_warning "Multiple demongrep binaries found in PATH:"
+    printf "%s\n" "$found" | while IFS= read -r path; do
+        [ -n "$path" ] && log_info "  - $path"
+    done
+
+    if [ "$active" != "$installed_path" ]; then
+        log_warning "Active demongrep is not the one just installed."
+        log_info "Current active: $active"
+        log_info "Expected:       $installed_path"
+        log_info "Fix by prepending install dir in your shell profile:"
+        log_info "    ${GREEN}export PATH=\"$install_dir:\$PATH\"${NC}"
+        log_info "Then restart the shell or run: ${GREEN}hash -r${NC}"
+    fi
+}
+
 # Main installation flow
 main() {
     parse_args "$@"
@@ -505,6 +561,8 @@ main() {
         log_info "  2. ${GREEN}demongrep index${NC}"
         log_info "  3. ${GREEN}demongrep search \"where do we handle authentication?\"${NC}"
     fi
+
+    warn_path_conflicts "$installed_path" "$install_dir"
     
     echo ""
 }

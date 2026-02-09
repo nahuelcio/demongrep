@@ -110,6 +110,29 @@ export PATH="$PATH:$HOME/.local/bin"
 
 Add this line to your shell profile to make it permanent.
 
+### Wrong version after installation
+
+You likely have multiple `demongrep` binaries in PATH and an older one is first.
+
+```bash
+which -a demongrep
+demongrep --version
+```
+
+Fix by prepending your intended install directory (usually `~/.local/bin`):
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+hash -r
+```
+
+Then verify again:
+
+```bash
+which -a demongrep
+demongrep --version
+```
+
 ### Permission denied
 
 Try installing to a different directory:

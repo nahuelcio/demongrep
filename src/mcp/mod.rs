@@ -19,6 +19,13 @@ use std::sync::Mutex;
 
 use crate::database::DatabaseManager; // NEW: Use DatabaseManager
 use crate::embed::EmbeddingService;
+use crate::rerank::NeuralReranker;
+
+const MCP_DEFAULT_LIMIT: usize = 6;
+const MCP_MAX_LIMIT: usize = 20;
+const MCP_CONTENT_CHAR_LIMIT: usize = 420;
+const MCP_DEFAULT_RERANK_TOP: usize = 50;
+const MCP_MAX_RERANK_TOP: usize = 200;
 
 /// Demongrep MCP service with dual-database support via DatabaseManager
 pub struct DemongrepService {
@@ -95,6 +102,10 @@ pub struct HybridSearchRequest {
     pub filter_path: Option<String>,
     /// RRF k parameter for score fusion (default: 20)
     pub rrf_k: Option<f32>,
+    /// Apply neural reranking to top candidates for better relevance
+    pub rerank: Option<bool>,
+    /// Number of top candidates to rerank (default: 50, max: 200)
+    pub rerank_top: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -153,6 +164,75 @@ impl DemongrepService {
         Ok(guard)
     }
 
+    fn normalize_limit(limit: Option<usize>) -> usize {
+        limit.unwrap_or(MCP_DEFAULT_LIMIT).clamp(1, MCP_MAX_LIMIT)
+    }
+
+    fn compact_content(content: &str) -> String {
+        if content.chars().count() <= MCP_CONTENT_CHAR_LIMIT {
+            return content.to_string();
+        }
+        let mut truncated: String = content.chars().take(MCP_CONTENT_CHAR_LIMIT).collect();
+        truncated.push_str(" ...");
+        truncated
+    }
+
+    fn normalize_rerank_top(rerank_top: Option<usize>) -> usize {
+        rerank_top
+            .unwrap_or(MCP_DEFAULT_RERANK_TOP)
+            .clamp(1, MCP_MAX_RERANK_TOP)
+    }
+
+    fn apply_optional_rerank(
+        query: &str,
+        mut results: Vec<crate::vectordb::SearchResult>,
+        rerank: bool,
+        rerank_top: usize,
+    ) -> Vec<crate::vectordb::SearchResult> {
+        if !rerank || results.is_empty() {
+            return results;
+        }
+
+        let top_n = rerank_top.min(results.len());
+        let top_results = results.drain(..top_n).collect::<Vec<_>>();
+        let documents = top_results
+            .iter()
+            .map(|r| r.content.clone())
+            .collect::<Vec<_>>();
+        let rrf_scores = top_results.iter().map(|r| r.score).collect::<Vec<_>>();
+
+        let mut reranker = match NeuralReranker::new() {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("Warning: Could not load reranker: {}", e);
+                let mut original = top_results;
+                original.extend(results);
+                return original;
+            }
+        };
+
+        let blended = match reranker.rerank_and_blend(query, &documents, &rrf_scores) {
+            Ok(scores) => scores,
+            Err(e) => {
+                eprintln!("Warning: Reranking failed: {}", e);
+                let mut original = top_results;
+                original.extend(results);
+                return original;
+            }
+        };
+
+        let mut reranked = Vec::with_capacity(top_n + results.len());
+        for (idx, blended_score) in blended {
+            if let Some(mut item) = top_results.get(idx).cloned() {
+                item.rerank_score = Some(blended_score);
+                item.score = blended_score;
+                reranked.push(item);
+            }
+        }
+        reranked.extend(results);
+        reranked
+    }
+
     #[tool(
         description = "Search the codebase using semantic similarity. Searches both local and global databases. Returns code chunks that are semantically similar to the query."
     )]
@@ -160,7 +240,7 @@ impl DemongrepService {
         &self,
         Parameters(request): Parameters<SemanticSearchRequest>,
     ) -> Result<CallToolResult, McpError> {
-        let limit = request.limit.unwrap_or(10);
+        let limit = Self::normalize_limit(request.limit);
         let offset = request.offset.unwrap_or(0);
 
         // Get embedding service and embed query
@@ -222,11 +302,11 @@ impl DemongrepService {
                     start_line: r.start_line,
                     end_line: r.end_line,
                     kind: r.kind,
-                    content: r.content,
+                    content: Self::compact_content(&r.content),
                     score: r.score,
-                    signature: r.signature,
-                    context_prev: r.context_prev,
-                    context_next: r.context_next,
+                    signature: None,
+                    context_prev: None,
+                    context_next: None,
                     database,
                     vector_score: r.vector_score,
                     fts_score: r.fts_score,
@@ -241,9 +321,7 @@ impl DemongrepService {
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
-    #[tool(
-        description = "Get all indexed chunks from a specific file. Searches across all databases. Useful for understanding the structure of a file."
-    )]
+    #[allow(dead_code)]
     async fn get_file_chunks(
         &self,
         Parameters(request): Parameters<GetFileChunksRequest>,
@@ -310,15 +388,17 @@ impl DemongrepService {
     }
 
     #[tool(
-        description = "Search the codebase using hybrid search (vector similarity + BM25 full-text + RRF fusion). More accurate than semantic_search alone. Searches both local and global databases."
+        description = "Primary code search tool. Uses hybrid search (vector similarity + BM25 + RRF fusion) across local/global indexes. Prefer this tool for most searches."
     )]
     async fn hybrid_search(
         &self,
         Parameters(request): Parameters<HybridSearchRequest>,
     ) -> Result<CallToolResult, McpError> {
-        let limit = request.limit.unwrap_or(10);
+        let limit = Self::normalize_limit(request.limit);
         let offset = request.offset.unwrap_or(0);
         let rrf_k = request.rrf_k.unwrap_or(20.0);
+        let rerank = request.rerank.unwrap_or(false);
+        let rerank_top = Self::normalize_rerank_top(request.rerank_top);
 
         // Get embedding service and embed query
         let mut service_guard = match self.get_embedding_service() {
@@ -368,6 +448,8 @@ impl DemongrepService {
             });
         }
 
+        results = Self::apply_optional_rerank(&request.query, results, rerank, rerank_top);
+
         if results.is_empty() {
             return Ok(CallToolResult::success(vec![Content::text(
                 "No results found for the query.",
@@ -381,11 +463,11 @@ impl DemongrepService {
                 start_line: r.start_line,
                 end_line: r.end_line,
                 kind: r.kind.clone(),
-                content: r.content.clone(),
+                content: Self::compact_content(&r.content),
                 score: r.score,
-                signature: r.signature.clone(),
-                context_prev: r.context_prev.clone(),
-                context_next: r.context_next.clone(),
+                signature: None,
+                context_prev: None,
+                context_next: None,
                 database: None,
                 vector_score: r.vector_score,
                 fts_score: r.fts_score,
@@ -399,9 +481,7 @@ impl DemongrepService {
         Ok(CallToolResult::success(vec![Content::text(json)]))
     }
 
-    #[tool(
-        description = "Re-index changed files in all databases. Detects modified, new, and deleted files and updates the index incrementally."
-    )]
+    #[allow(dead_code)]
     async fn reindex(
         &self,
         Parameters(_request): Parameters<ReindexRequest>,
@@ -430,9 +510,7 @@ impl DemongrepService {
         ))]))
     }
 
-    #[tool(
-        description = "Find code definitions (functions, structs, traits, methods, etc.) across all databases. Useful for navigating the codebase structure."
-    )]
+    #[allow(dead_code)]
     async fn find_definitions(
         &self,
         Parameters(request): Parameters<FindDefinitionsRequest>,
@@ -488,11 +566,11 @@ impl DemongrepService {
                         start_line: chunk.start_line,
                         end_line: chunk.end_line,
                         kind: chunk.kind,
-                        content: chunk.content,
+                        content: Self::compact_content(&chunk.content),
                         score: 1.0,
-                        signature: chunk.signature,
-                        context_prev: chunk.context_prev,
-                        context_next: chunk.context_next,
+                        signature: None,
+                        context_prev: None,
+                        context_next: None,
                         database: Some(db_type.to_string()),
                         vector_score: None,
                         fts_score: None,
@@ -584,10 +662,8 @@ impl ServerHandler for DemongrepService {
             },
             instructions: Some(
                 "Demongrep is a semantic code search tool with dual-database support. \
-                 Tools: semantic_search (vector similarity), hybrid_search (vector + BM25 + RRF fusion, most accurate), \
-                 find_definitions (browse functions/structs/traits by kind and name), \
-                 get_file_chunks (see all chunks in a file), reindex (update index with file changes), \
-                 index_status (check index readiness and stats)."
+                 Keep calls compact: start with hybrid_search, use semantic_search only if needed, \
+                 and use index_status for diagnostics. Results are intentionally short to reduce context usage."
                     .to_string(),
             ),
             ..Default::default()

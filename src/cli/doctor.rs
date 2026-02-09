@@ -1,5 +1,6 @@
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::Value;
+use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -11,6 +12,7 @@ pub async fn run() -> Result<()> {
     let mut warnings: Vec<String> = Vec::new();
 
     check_binary(&mut failures)?;
+    check_path_conflicts(&mut warnings)?;
     check_local_index(&mut warnings)?;
     check_agent_config(
         "Claude Code",
@@ -69,6 +71,45 @@ fn check_binary(failures: &mut Vec<String>) -> Result<()> {
             failures.push(format!("Binary is not executable: {}", binary.display()));
         }
     }
+
+    Ok(())
+}
+
+fn check_path_conflicts(warnings: &mut Vec<String>) -> Result<()> {
+    let path = env::var("PATH").unwrap_or_default();
+    if path.is_empty() {
+        return Ok(());
+    }
+
+    let mut matches: Vec<PathBuf> = Vec::new();
+    let mut seen = HashSet::new();
+    for segment in env::split_paths(&path) {
+        if segment.as_os_str().is_empty() {
+            continue;
+        }
+        let candidate = segment.join("demongrep");
+        if candidate.is_file() {
+            let key = candidate.to_string_lossy().to_string();
+            if !seen.insert(key) {
+                continue;
+            }
+            matches.push(candidate);
+        }
+    }
+
+    if matches.len() <= 1 {
+        return Ok(());
+    }
+
+    let listed = matches
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    warnings.push(format!(
+        "Multiple demongrep binaries detected in PATH: {}. Keep only one first in PATH to avoid version skew.",
+        listed
+    ));
 
     Ok(())
 }
@@ -134,36 +175,55 @@ fn check_agent_config(
         )
     })?;
 
-    let mcp_servers = parsed.get("mcpServers");
-    if mcp_servers.is_none() {
-        warnings.push(format!(
-            "{} config has no `mcpServers` key: {}",
-            name,
-            config_path.display()
-        ));
+    if let Some(mcp_servers) = parsed.get("mcpServers") {
+        if !mcp_servers.is_object() {
+            failures.push(format!(
+                "{} config has non-object `mcpServers`: {}",
+                name,
+                config_path.display()
+            ));
+            return Ok(());
+        }
+
+        let demongrep = &parsed["mcpServers"]["demongrep"];
+        if demongrep.is_null() {
+            warnings.push(format!("{} has no `mcpServers.demongrep` entry", name));
+            return Ok(());
+        }
+
+        validate_demongrep_legacy_entry(name, &config_path, demongrep, failures);
         return Ok(());
     }
 
-    if !mcp_servers.and_then(Value::as_object).is_some() {
-        failures.push(format!(
-            "{} config has non-object `mcpServers`: {}",
-            name,
-            config_path.display()
-        ));
+    if let Some(mcp) = parsed.get("mcp") {
+        if !mcp.is_object() {
+            failures.push(format!(
+                "{} config has non-object `mcp`: {}",
+                name,
+                config_path.display()
+            ));
+            return Ok(());
+        }
+
+        let demongrep = &parsed["mcp"]["demongrep"];
+        if demongrep.is_null() {
+            warnings.push(format!("{} has no `mcp.demongrep` entry", name));
+            return Ok(());
+        }
+
+        validate_demongrep_new_entry(name, &config_path, demongrep, failures);
         return Ok(());
     }
 
-    let demongrep = &parsed["mcpServers"]["demongrep"];
-    if demongrep.is_null() {
-        warnings.push(format!("{} has no `mcpServers.demongrep` entry", name));
-        return Ok(());
-    }
-
-    validate_demongrep_entry(name, &config_path, demongrep, failures);
+    warnings.push(format!(
+        "{} config has neither `mcpServers` nor `mcp` key: {}",
+        name,
+        config_path.display()
+    ));
     Ok(())
 }
 
-fn validate_demongrep_entry(
+fn validate_demongrep_legacy_entry(
     name: &str,
     config_path: &Path,
     entry: &Value,
@@ -191,6 +251,33 @@ fn validate_demongrep_entry(
     if !args_ok {
         failures.push(format!(
             "{} demongrep MCP entry has invalid `args` (expected [\"mcp\", \"<project>\"]): {}",
+            name,
+            config_path.display()
+        ));
+    }
+}
+
+fn validate_demongrep_new_entry(
+    name: &str,
+    config_path: &Path,
+    entry: &Value,
+    failures: &mut Vec<String>,
+) {
+    let command_ok = entry
+        .get("command")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.len() >= 2
+                && arr
+                    .iter()
+                    .all(|v| v.as_str().map(|s| !s.trim().is_empty()).unwrap_or(false))
+                && arr.get(1).and_then(Value::as_str) == Some("mcp")
+        })
+        .unwrap_or(false);
+
+    if !command_ok {
+        failures.push(format!(
+            "{} demongrep MCP entry has invalid `command` array (expected [\"<bin>\", \"mcp\", \"<project>\", ...]): {}",
             name,
             config_path.display()
         ));
