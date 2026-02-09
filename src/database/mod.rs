@@ -242,8 +242,20 @@ impl DatabaseManager {
         offset: usize,
         rrf_k: f32,
     ) -> Result<Vec<SearchResult>> {
+        self.hybrid_search_all_with_limit(query, query_embedding, limit, offset, rrf_k, 100)
+    }
+
+    /// Hybrid search with configurable retrieval limit (for MCP optimization)
+    pub fn hybrid_search_all_with_limit(
+        &self,
+        query: &str,
+        query_embedding: &[f32],
+        limit: usize,
+        offset: usize,
+        rrf_k: f32,
+        retrieval_limit: usize,
+    ) -> Result<Vec<SearchResult>> {
         let mut all_results: Vec<SearchResult> = Vec::new();
-        let retrieval_limit = 200; // Retrieve more for fusion
 
         for database in &self.databases {
             // Vector search
@@ -273,8 +285,8 @@ impl DatabaseManager {
             let chunk_id_to_result: std::collections::HashMap<u32, &SearchResult> =
                 vector_results.iter().map(|r| (r.id, r)).collect();
 
-            let retrieval_limit = limit.saturating_add(offset);
-            for fused in fused_results.iter().take(retrieval_limit) {
+            let take_limit = limit.saturating_add(offset);
+            for fused in fused_results.iter().take(take_limit) {
                 if let Some(result) = chunk_id_to_result.get(&fused.chunk_id) {
                     let mut r = (*result).clone();
                     r.score = fused.rrf_score;

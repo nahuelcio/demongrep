@@ -22,21 +22,22 @@ use crate::database::DatabaseManager; // NEW: Use DatabaseManager
 use crate::embed::EmbeddingService;
 use crate::rerank::NeuralReranker;
 
-const MCP_DEFAULT_LIMIT: usize = 6;
-const MCP_MAX_LIMIT: usize = 20;
-const MCP_CONTENT_CHAR_LIMIT: usize = 420;
-const MCP_DEFAULT_RERANK_TOP: usize = 50;
-const MCP_MAX_RERANK_TOP: usize = 200;
+const MCP_DEFAULT_LIMIT: usize = 4;
+const MCP_MAX_LIMIT: usize = 10;
+const MCP_CONTENT_CHAR_LIMIT: usize = 250;
+const MCP_DEFAULT_RERANK_TOP: usize = 20;
+const MCP_MAX_RERANK_TOP: usize = 50;
 const MCP_DEFAULT_PER_FILE: usize = 1;
-const MCP_MAX_PER_FILE: usize = 5;
-const MCP_MAX_CANDIDATE_LIMIT: usize = 100;
+const MCP_MAX_PER_FILE: usize = 3;
+const MCP_MAX_CANDIDATE_LIMIT: usize = 50;
 
 /// Demongrep MCP service with dual-database support via DatabaseManager
 pub struct DemongrepService {
     tool_router: ToolRouter<DemongrepService>,
-    db_manager: DatabaseManager, // NEW: Replaced db_paths with DatabaseManager
-    // Lazily initialized on first search
+    db_manager: DatabaseManager,
+    // Lazily initialized on first use
     embedding_service: Mutex<Option<EmbeddingService>>,
+    reranker: Mutex<Option<NeuralReranker>>,
 }
 
 impl std::fmt::Debug for DemongrepService {
@@ -54,12 +55,14 @@ pub struct SemanticSearchRequest {
     /// The search query (natural language or code snippet)
     pub query: String,
 
-    /// Maximum number of results to return (default: 10)
+    /// Maximum number of results to return (default: 4)
     pub limit: Option<usize>,
     /// Offset for pagination (default: 0)
     pub offset: Option<usize>,
-    /// Maximum matches per file (default: 1, max: 5)
+    /// Maximum matches per file (default: 1, max: 3)
     pub per_file: Option<usize>,
+    /// Return compact output (path:lines format only)
+    pub compact: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -96,11 +99,20 @@ pub struct SearchResultItem {
     pub rerank_score: Option<f32>,
 }
 
+/// Compact search result for minimal token usage
+#[derive(Debug, Serialize)]
+pub struct CompactResultItem {
+    /// Path with line range (e.g., "src/main.rs:10-25")
+    pub path: String,
+    /// Relevance score
+    pub score: f32,
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct HybridSearchRequest {
     /// The search query (natural language or code snippet)
     pub query: String,
-    /// Maximum number of results to return (default: 10)
+    /// Maximum number of results to return (default: 4)
     pub limit: Option<usize>,
     /// Offset for pagination (default: 0)
     pub offset: Option<usize>,
@@ -110,10 +122,12 @@ pub struct HybridSearchRequest {
     pub rrf_k: Option<f32>,
     /// Apply neural reranking to top candidates for better relevance
     pub rerank: Option<bool>,
-    /// Number of top candidates to rerank (default: 50, max: 200)
+    /// Number of top candidates to rerank (default: 20, max: 50)
     pub rerank_top: Option<usize>,
-    /// Maximum matches per file (default: 1, max: 5)
+    /// Maximum matches per file (default: 1, max: 3)
     pub per_file: Option<usize>,
+    /// Return compact output (path:lines format only)
+    pub compact: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -157,6 +171,7 @@ impl DemongrepService {
             tool_router: Self::tool_router(),
             db_manager,
             embedding_service: Mutex::new(None),
+            reranker: Mutex::new(None),
         })
     }
 
@@ -168,6 +183,18 @@ impl DemongrepService {
             .map_err(|e| anyhow::anyhow!("MCP embedding mutex poisoned: {}", e))?;
         if guard.is_none() {
             *guard = Some(EmbeddingService::with_model(self.db_manager.model_type())?);
+        }
+        Ok(guard)
+    }
+
+    /// Get or initialize the reranker (lazy loading)
+    fn get_reranker(&self) -> Result<std::sync::MutexGuard<'_, Option<NeuralReranker>>> {
+        let mut guard = self
+            .reranker
+            .lock()
+            .map_err(|e| anyhow::anyhow!("MCP reranker mutex poisoned: {}", e))?;
+        if guard.is_none() {
+            *guard = Some(NeuralReranker::new()?);
         }
         Ok(guard)
     }
@@ -200,7 +227,7 @@ impl DemongrepService {
     fn normalize_candidate_limit(limit: usize, per_file: usize) -> usize {
         limit
             .saturating_mul(per_file)
-            .saturating_mul(4)
+            .saturating_mul(2)
             .clamp(limit, MCP_MAX_CANDIDATE_LIMIT)
     }
 
@@ -233,6 +260,7 @@ impl DemongrepService {
     }
 
     fn apply_optional_rerank(
+        &self,
         query: &str,
         mut results: Vec<crate::vectordb::SearchResult>,
         rerank: bool,
@@ -250,10 +278,20 @@ impl DemongrepService {
             .collect::<Vec<_>>();
         let rrf_scores = top_results.iter().map(|r| r.score).collect::<Vec<_>>();
 
-        let mut reranker = match NeuralReranker::new() {
-            Ok(r) => r,
+        let mut guard = match self.get_reranker() {
+            Ok(g) => g,
             Err(e) => {
                 eprintln!("Warning: Could not load reranker: {}", e);
+                let mut original = top_results;
+                original.extend(results);
+                return original;
+            }
+        };
+
+        let reranker = match guard.as_mut() {
+            Some(r) => r,
+            None => {
+                eprintln!("Warning: Reranker not available");
                 let mut original = top_results;
                 original.extend(results);
                 return original;
@@ -340,6 +378,19 @@ impl DemongrepService {
         let diversified = Self::limit_results_per_file(results, per_file, limit);
 
         // Convert to response format
+        let compact = request.compact.unwrap_or(false);
+        if compact {
+            let items: Vec<CompactResultItem> = diversified
+                .into_iter()
+                .map(|r| CompactResultItem {
+                    path: format!("{}:{}-{}", r.path, r.start_line, r.end_line),
+                    score: r.score,
+                })
+                .collect();
+            let json = serde_json::to_string(&items).unwrap_or_else(|_| "[]".to_string());
+            return Ok(CallToolResult::success(vec![Content::text(json)]));
+        }
+
         let items: Vec<SearchResultItem> = diversified
             .into_iter()
             .map(|r| {
@@ -507,13 +558,27 @@ impl DemongrepService {
             });
         }
 
-        results = Self::apply_optional_rerank(&request.query, results, rerank, rerank_top);
+        results = self.apply_optional_rerank(&request.query, results, rerank, rerank_top);
         results = Self::limit_results_per_file(results, per_file, limit);
 
         if results.is_empty() {
             return Ok(CallToolResult::success(vec![Content::text(
                 "No results found for the query.",
             )]));
+        }
+
+        // Check for compact mode
+        let compact = request.compact.unwrap_or(false);
+        if compact {
+            let items: Vec<CompactResultItem> = results
+                .into_iter()
+                .map(|r| CompactResultItem {
+                    path: format!("{}:{}-{}", r.path, r.start_line, r.end_line),
+                    score: r.score,
+                })
+                .collect();
+            let json = serde_json::to_string(&items).unwrap_or_else(|_| "[]".to_string());
+            return Ok(CallToolResult::success(vec![Content::text(json)]));
         }
 
         let items: Vec<SearchResultItem> = results
@@ -721,10 +786,8 @@ impl ServerHandler for DemongrepService {
                 website_url: None,
             },
             instructions: Some(
-                "Demongrep is a semantic code search tool with dual-database support. \
-                 Execution policy: start with one hybrid_search call, avoid chain-calling tools for the same query, \
-                 use semantic_search only if hybrid_search is empty, and use index_status only for diagnostics. \
-                 Do not narrate internal reasoning; return concise findings with file paths and line ranges."
+                "Code search tool. Policy: one hybrid_search per query, limit=4, no chaining. \
+                 Use semantic_search only if hybrid returns empty. Return: path, lines, score. Be concise."
                     .to_string(),
             ),
             ..Default::default()
