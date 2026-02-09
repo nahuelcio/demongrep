@@ -1,5 +1,5 @@
 ---
-name: demongrep-agent-workflows
+name: demongrep
 description: Install, configure, validate, and troubleshoot demongrep for coding agents (Codex, Claude Code, OpenCode). Standalone workflow with no external references.
 ---
 
@@ -16,6 +16,30 @@ Use this skill when the user asks to:
 - In coding agents (OpenCode/Codex/Claude), demongrep runs via MCP tools (`demongrep_*`) through `demongrep mcp`.
 - In terminal usage, demongrep runs via direct CLI (`demongrep search ...`).
 - CLI flags are not automatically available in MCP unless explicitly exposed by MCP tool schema.
+
+## Daily usage (CLI)
+
+Use these commands when the user asks to find code by meaning:
+
+```bash
+# Basic semantic search
+demongrep search "where do we validate auth tokens"
+
+# Better precision on top candidates
+demongrep search "permission checks in handlers" --rerank --rerank-top 50
+
+# Restrict to an area
+demongrep search "retry backoff logic" --filter-path src/
+
+# Agent-optimized output
+demongrep search "request entrypoint" --agent
+
+# Machine-readable output
+demongrep search "jwt middleware" --json --quiet
+```
+
+If user provides legacy shorthand (`demongrep "query" .`), treat it as:
+`demongrep search "query" --path .`
 
 ## Standard setup flow
 

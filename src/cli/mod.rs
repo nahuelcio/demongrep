@@ -217,7 +217,7 @@ pub enum Commands {
     /// Install demongrep coding-agent skills into .agents skill folders
     AddSkills {
         /// Skill name to install
-        #[arg(long, default_value = "demongrep-agent-workflows")]
+        #[arg(long, default_value = "demongrep")]
         skill: String,
 
         /// Git ref (tag/branch) to install from (defaults to current demongrep version tag)

@@ -3,7 +3,7 @@ set -euo pipefail
 
 REPO_OWNER="nahuelcio"
 REPO_NAME="demongrep"
-SKILL_NAME="demongrep-agent-workflows"
+SKILL_NAME="demongrep"
 REF="${REF:-main}"
 DEST_DIR="${CODEX_SKILLS_DIR:-$HOME/.codex/skills}"
 TEMP_DIR=""

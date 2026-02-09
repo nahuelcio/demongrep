@@ -10,6 +10,14 @@ pub fn run(skill: String, ref_name: Option<String>, dest: Option<PathBuf>) -> Re
     ensure_command("curl")?;
     ensure_command("tar")?;
 
+    let requested_skill = skill;
+    let skill = if requested_skill == "demongrep-agent-workflows" {
+        println!("Note: skill name 'demongrep-agent-workflows' is deprecated; using 'demongrep'.");
+        "demongrep".to_string()
+    } else {
+        requested_skill
+    };
+
     let ref_name = ref_name.unwrap_or_else(|| format!("v{}", env!("CARGO_PKG_VERSION")));
     let destinations = resolve_destinations(dest)?;
     let temp_root = create_temp_root()?;
