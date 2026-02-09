@@ -258,7 +258,7 @@ pub enum Commands {
 }
 
 pub async fn run() -> Result<()> {
-    let cli = Cli::parse();
+    let cli = Cli::parse_from(rewrite_legacy_search_args(std::env::args().collect()));
 
     // Parse model from CLI flag
     let model_type = cli.model.as_ref().and_then(|m| ModelType::from_str(m));
@@ -371,6 +371,103 @@ pub async fn run() -> Result<()> {
             output,
             json,
         } => crate::bench::bench(models, profile, limit, path, output, json).await,
+    }
+}
+
+fn is_known_subcommand(arg: &str) -> bool {
+    matches!(
+        arg,
+        "search"
+            | "index"
+            | "serve"
+            | "list"
+            | "stats"
+            | "clear"
+            | "doctor"
+            | "setup"
+            | "mcp"
+            | "install-claude-code"
+            | "install-codex"
+            | "install-opencode"
+            | "add-skills"
+            | "bench"
+    )
+}
+
+fn rewrite_legacy_search_args(mut args: Vec<String>) -> Vec<String> {
+    // Back-compat UX: `demongrep "query" .` -> `demongrep search "query" --path .`
+    if args.len() < 2 {
+        return args;
+    }
+    let first = args[1].as_str();
+    if first.starts_with('-') || is_known_subcommand(first) {
+        return args;
+    }
+
+    args.insert(1, "search".to_string());
+
+    // If the next positional token looks like a path, map it to --path.
+    // Pattern after insert: [bin, search, query, maybe_path, ...]
+    if args.len() >= 4 {
+        let maybe_path = args[3].clone();
+        if !maybe_path.starts_with('-') {
+            args.remove(3);
+            args.insert(3, "--path".to_string());
+            args.insert(4, maybe_path);
+        }
+    }
+
+    args
+}
+
+#[cfg(test)]
+mod cli_args_tests {
+    use super::rewrite_legacy_search_args;
+
+    #[test]
+    fn rewrites_legacy_query_only() {
+        let out = rewrite_legacy_search_args(vec![
+            "demongrep".to_string(),
+            "auth middleware".to_string(),
+        ]);
+        assert_eq!(out[1], "search");
+        assert_eq!(out[2], "auth middleware");
+    }
+
+    #[test]
+    fn rewrites_legacy_query_and_path() {
+        let out = rewrite_legacy_search_args(vec![
+            "demongrep".to_string(),
+            "prompt".to_string(),
+            ".".to_string(),
+        ]);
+        assert_eq!(
+            out,
+            vec![
+                "demongrep".to_string(),
+                "search".to_string(),
+                "prompt".to_string(),
+                "--path".to_string(),
+                ".".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn keeps_normal_subcommand() {
+        let out = rewrite_legacy_search_args(vec![
+            "demongrep".to_string(),
+            "search".to_string(),
+            "prompt".to_string(),
+        ]);
+        assert_eq!(
+            out,
+            vec![
+                "demongrep".to_string(),
+                "search".to_string(),
+                "prompt".to_string()
+            ]
+        );
     }
 }
 

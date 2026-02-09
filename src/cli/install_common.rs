@@ -5,7 +5,20 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub fn get_demongrep_binary_path() -> Result<PathBuf> {
-    env::current_exe().context("Failed to get current executable path")
+    let current = env::current_exe().context("Failed to get current executable path")?;
+
+    // If invoked from `cargo run` (target/{debug,release}), prefer installed user binary when present.
+    let current_str = current.to_string_lossy();
+    if current_str.contains("/target/debug/") || current_str.contains("/target/release/") {
+        if let Some(home) = dirs::home_dir() {
+            let preferred = home.join(".local").join("bin").join("demongrep-bin");
+            if preferred.is_file() {
+                return Ok(preferred);
+            }
+        }
+    }
+
+    Ok(current)
 }
 
 pub fn resolve_project_path(project_path: Option<PathBuf>) -> Result<PathBuf> {
@@ -30,15 +43,16 @@ pub fn load_config(config_path: &Path) -> Result<Value> {
     }
 }
 
+fn is_opencode(agent_name: &str) -> bool {
+    agent_name.eq_ignore_ascii_case("OpenCode")
+}
+
 pub fn update_mcp_config(
     mut config: Value,
     demongrep_path: &Path,
     project_path: &Path,
+    agent_name: &str,
 ) -> Result<Value> {
-    if !config["mcpServers"].is_object() {
-        config["mcpServers"] = json!({});
-    }
-
     let cmd_str = demongrep_path
         .to_str()
         .ok_or_else(|| anyhow!("Failed to convert demongrep path to string"))?;
@@ -47,10 +61,24 @@ pub fn update_mcp_config(
         .to_str()
         .ok_or_else(|| anyhow!("Failed to convert project path to string"))?;
 
-    config["mcpServers"]["demongrep"] = json!({
-        "command": cmd_str,
-        "args": ["mcp", project_str]
-    });
+    if is_opencode(agent_name) {
+        if !config["mcp"].is_object() {
+            config["mcp"] = json!({});
+        }
+        config["mcp"]["demongrep"] = json!({
+            "type": "local",
+            "command": [cmd_str, "mcp", project_str],
+            "enabled": true
+        });
+    } else {
+        if !config["mcpServers"].is_object() {
+            config["mcpServers"] = json!({});
+        }
+        config["mcpServers"]["demongrep"] = json!({
+            "command": cmd_str,
+            "args": ["mcp", project_str]
+        });
+    }
 
     Ok(config)
 }
@@ -96,7 +124,7 @@ pub fn install_agent_mcp(
     let project_path = resolve_project_path(project_path)?;
 
     let config = load_config(config_path).context("Failed to load or initialize config")?;
-    let updated_config = update_mcp_config(config, &demongrep_path, &project_path)
+    let updated_config = update_mcp_config(config, &demongrep_path, &project_path, agent_name)
         .context("Failed to update MCP configuration")?;
 
     println!("{} MCP integration", agent_name);
@@ -106,11 +134,20 @@ pub fn install_agent_mcp(
 
     if dry_run {
         println!("Dry run mode: no changes written.");
-        println!("Planned mcpServers.demongrep entry:");
+        let path = if is_opencode(agent_name) {
+            "mcp.demongrep"
+        } else {
+            "mcpServers.demongrep"
+        };
+        println!("Planned {} entry:", path);
+        let preview = if is_opencode(agent_name) {
+            &updated_config["mcp"]["demongrep"]
+        } else {
+            &updated_config["mcpServers"]["demongrep"]
+        };
         println!(
             "{}",
-            serde_json::to_string_pretty(&updated_config["mcpServers"]["demongrep"])
-                .unwrap_or_else(|_| "{}".to_string())
+            serde_json::to_string_pretty(preview).unwrap_or_else(|_| "{}".to_string())
         );
         return Ok(());
     }
@@ -147,6 +184,7 @@ mod tests {
             config,
             Path::new("/tmp/demongrep"),
             Path::new("/tmp/project"),
+            "Codex",
         )
         .unwrap();
 
@@ -170,6 +208,7 @@ mod tests {
             config,
             Path::new("/tmp/demongrep"),
             Path::new("/tmp/project"),
+            "Codex",
         )
         .unwrap();
 
@@ -194,5 +233,25 @@ mod tests {
         assert!(backup.exists());
         let content = fs::read_to_string(path).unwrap();
         assert!(content.contains("demongrep"));
+    }
+
+    #[test]
+    fn update_mcp_config_uses_new_format_for_opencode() {
+        let config = json!({"theme": "dark"});
+        let updated = update_mcp_config(
+            config,
+            Path::new("/tmp/demongrep"),
+            Path::new("/tmp/project"),
+            "OpenCode",
+        )
+        .unwrap();
+
+        assert_eq!(updated["theme"], "dark");
+        assert!(updated["mcp"].is_object());
+        assert_eq!(updated["mcp"]["demongrep"]["type"], "local");
+        assert_eq!(updated["mcp"]["demongrep"]["command"][0], "/tmp/demongrep");
+        assert_eq!(updated["mcp"]["demongrep"]["command"][1], "mcp");
+        assert_eq!(updated["mcp"]["demongrep"]["command"][2], "/tmp/project");
+        assert_eq!(updated["mcp"]["demongrep"]["enabled"], true);
     }
 }
