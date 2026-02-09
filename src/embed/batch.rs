@@ -1,4 +1,4 @@
-use super::embedder::FastEmbedder;
+use super::embedder::{FastEmbedder, ModelType};
 use crate::chunker::Chunk;
 use anyhow::Result;
 use rayon::prelude::*;
@@ -102,11 +102,16 @@ impl BatchEmbedder {
         );
 
         let start = std::time::Instant::now();
+        let model_type = self
+            .embedder
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Embedder mutex poisoned: {}", e))?
+            .model_type();
 
         // Prepare ALL texts in parallel using rayon before batching to the model
         let all_texts: Vec<String> = chunks
             .par_iter()
-            .map(|chunk| Self::prepare_text(chunk))
+            .map(|chunk| Self::prepare_text_for_model(chunk, model_type))
             .collect();
 
         let mut embedded_chunks = Vec::with_capacity(total);
@@ -131,7 +136,7 @@ impl BatchEmbedder {
                 .embedder
                 .lock()
                 .map_err(|e| anyhow::anyhow!("Embedder mutex poisoned: {}", e))?
-                .embed_batch(text_batch.to_vec())?;
+                .embed_batch_refs(text_batch)?;
 
             // Combine chunks with embeddings
             for (chunk, embedding) in chunk_batch.iter().zip(embeddings.into_iter()) {
@@ -152,12 +157,12 @@ impl BatchEmbedder {
 
     /// Embed a single chunk
     pub fn embed_chunk(&mut self, chunk: Chunk) -> Result<EmbeddedChunk> {
-        let text = Self::prepare_text(&chunk);
-        let embedding = self
+        let mut guard = self
             .embedder
             .lock()
-            .map_err(|e| anyhow::anyhow!("Embedder mutex poisoned: {}", e))?
-            .embed_one(&text)?;
+            .map_err(|e| anyhow::anyhow!("Embedder mutex poisoned: {}", e))?;
+        let text = Self::prepare_text_for_model(&chunk, guard.model_type());
+        let embedding = guard.embed_one(&text)?;
         Ok(EmbeddedChunk::new(chunk, embedding))
     }
 
@@ -169,6 +174,16 @@ impl BatchEmbedder {
     /// - Docstring (if available)
     /// - Content
     pub fn prepare_text(chunk: &Chunk) -> String {
+        Self::prepare_text_for_model(chunk, ModelType::default())
+    }
+
+    /// Prepare chunk text with model-specific passage formatting.
+    pub fn prepare_text_for_model(chunk: &Chunk, model_type: ModelType) -> String {
+        let base = Self::prepare_text_base(chunk);
+        model_type.format_passage(&base)
+    }
+
+    fn prepare_text_base(chunk: &Chunk) -> String {
         let mut parts = Vec::new();
 
         // Add context breadcrumbs (e.g., "File: main.rs > Class: Server")
@@ -320,6 +335,21 @@ mod tests {
     }
 
     #[test]
+    fn test_prepare_text_model_specific_formatting() {
+        let chunk = Chunk::new(
+            "fn test() {}".to_string(),
+            0,
+            1,
+            ChunkKind::Function,
+            "test.rs".to_string(),
+        );
+
+        let bge_text = BatchEmbedder::prepare_text_for_model(&chunk, ModelType::BGESmallENV15Q);
+        let minilm_text = BatchEmbedder::prepare_text_for_model(&chunk, ModelType::AllMiniLML6V2Q);
+        assert_eq!(bge_text, minilm_text);
+    }
+
+    #[test]
     fn test_cosine_similarity() {
         let a = vec![1.0, 0.0, 0.0];
         let b = vec![1.0, 0.0, 0.0];
@@ -362,7 +392,7 @@ mod tests {
         assert_eq!(embedded.len(), 2);
 
         for emb_chunk in &embedded {
-            assert_eq!(emb_chunk.embedding.len(), 384);
+            assert_eq!(emb_chunk.embedding.len(), 768);
         }
     }
 }

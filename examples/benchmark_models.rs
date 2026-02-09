@@ -52,9 +52,8 @@ fn main() -> Result<()> {
     println!("╚══════════════════════════════════════════════════════════════╝");
     println!();
 
-    // Models to benchmark - Batch 4: ModernBERT (final model)
-    // All others tested successfully
-    let models_to_test = vec![ModelType::ModernBertEmbedLarge];
+    // Models to benchmark
+    let models_to_test = ModelType::all().to_vec();
 
     println!("📋 Models to benchmark: {}", models_to_test.len());
     for model in &models_to_test {

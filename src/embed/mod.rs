@@ -72,7 +72,8 @@ impl EmbeddingService {
         let mut guard = embedder_arc
             .lock()
             .map_err(|e| anyhow::anyhow!("Embedding mutex poisoned: {}", e))?;
-        guard.embed_one(query)
+        let formatted = guard.model_type().format_query(query);
+        guard.embed_one(&formatted)
     }
 
     /// Embed a code snippet as a passage (for code-to-code similarity search).
@@ -84,7 +85,8 @@ impl EmbeddingService {
         let mut guard = embedder_arc
             .lock()
             .map_err(|e| anyhow::anyhow!("Embedding mutex poisoned: {}", e))?;
-        guard.embed_one(&prepared)
+        let formatted = guard.model_type().format_passage(&prepared);
+        guard.embed_one(&formatted)
     }
 
     /// Get embedding dimensions
@@ -151,7 +153,7 @@ mod tests {
     #[test]
     fn test_model_type_default() {
         let model = ModelType::default();
-        assert_eq!(model.dimensions(), 384);
+        assert_eq!(model.dimensions(), 768);
     }
 
     #[test]
@@ -161,7 +163,7 @@ mod tests {
         assert!(service.is_ok());
 
         let service = service.unwrap();
-        assert_eq!(service.dimensions(), 384);
+        assert_eq!(service.dimensions(), 768);
     }
 
     #[test]
@@ -170,7 +172,7 @@ mod tests {
         let mut service = EmbeddingService::new().unwrap();
         let query_embedding = service.embed_query("find authentication code").unwrap();
 
-        assert_eq!(query_embedding.len(), 384);
+        assert_eq!(query_embedding.len(), 768);
     }
 
     #[test]

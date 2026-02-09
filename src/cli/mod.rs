@@ -24,10 +24,8 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub store: Option<String>,
 
-    /// Embedding model to use (e.g., bge-small, minilm-l6-q, jina-code)
-    /// Available: minilm-l6, minilm-l6-q, minilm-l12, minilm-l12-q, paraphrase-minilm,
-    ///            bge-small, bge-small-q, bge-base, nomic-v1, nomic-v1.5, nomic-v1.5-q,
-    ///            jina-code, e5-multilingual, mxbai-large, modernbert-large
+    /// Embedding model to use (e.g., bge-small-q, minilm-l6-q, jina-code, mxbai-large, mxbai-xsmall)
+    /// Available: minilm-l6-q, bge-small-q, jina-code, mxbai-large, mxbai-xsmall
     #[arg(long, global = true)]
     pub model: Option<String>,
 }
@@ -168,7 +166,7 @@ pub enum Commands {
 
     /// Download embedding models
     Setup {
-        /// Model to download (defaults to mxbai-embed-xsmall-v1)
+        /// Model to download (defaults to current default embedding model)
         #[arg(long)]
         model: Option<String>,
     },
@@ -233,9 +231,13 @@ pub enum Commands {
 
     /// Benchmark embedding models (compare performance, quality, and memory)
     Bench {
-        /// Comma-separated list of models to benchmark (default: all)
+        /// Comma-separated list of models to benchmark (overrides --profile)
         #[arg(long)]
         models: Option<String>,
+
+        /// Benchmark model profile (smoke, standard, full)
+        #[arg(long, default_value = "standard")]
+        profile: String,
 
         /// Maximum files to index for benchmark (default: 100)
         #[arg(long)]
@@ -263,9 +265,7 @@ pub async fn run() -> Result<()> {
     if cli.model.is_some() && model_type.is_none() {
         return Err(anyhow::anyhow!(
             "Unknown model: '{}'. Available models:\n  \
-             minilm-l6, minilm-l6-q, minilm-l12, minilm-l12-q, paraphrase-minilm\n  \
-             bge-small, bge-small-q, bge-base, nomic-v1, nomic-v1.5, nomic-v1.5-q\n  \
-             jina-code, e5-multilingual, mxbai-large, modernbert-large",
+             minilm-l6-q, bge-small-q, jina-code, mxbai-large, mxbai-xsmall",
             cli.model.as_ref().unwrap()
         ));
     }
@@ -365,11 +365,12 @@ pub async fn run() -> Result<()> {
         } => crate::cli::add_skills::run(skill, ref_name, dest),
         Commands::Bench {
             models,
+            profile,
             limit,
             path,
             output,
             json,
-        } => crate::bench::bench(models, limit, path, output, json).await,
+        } => crate::bench::bench(models, profile, limit, path, output, json).await,
     }
 }
 

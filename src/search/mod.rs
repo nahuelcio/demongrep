@@ -145,10 +145,12 @@ pub async fn search(
                 "{}",
                 "⚠️  Unknown model in metadata, using default".yellow()
             );
-            (ModelType::default(), 384)
+            let default_model = ModelType::default();
+            (default_model, default_model.dimensions())
         }
     } else {
-        (ModelType::default(), 384)
+        let default_model = ModelType::default();
+        (default_model, default_model.dimensions())
     };
 
     // Initialize embedding service once (shared across all databases)

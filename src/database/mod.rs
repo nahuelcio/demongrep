@@ -98,8 +98,10 @@ impl DatabaseManager {
         }
 
         // Read metadata from first database
-        let (model_type, dimensions) =
-            Self::read_metadata(&db_paths[0]).unwrap_or_else(|| (ModelType::default(), 384));
+        let (model_type, dimensions) = Self::read_metadata(&db_paths[0]).unwrap_or_else(|| {
+            let default_model = ModelType::default();
+            (default_model, default_model.dimensions())
+        });
 
         // Load all databases
         let mut databases = Vec::new();
@@ -434,8 +436,10 @@ impl DatabaseManagerBuilder {
             if let (Some(mt), Some(dims)) = (self.model_type, self.dimensions) {
                 (mt, dims)
             } else {
-                DatabaseManager::read_metadata(&self.db_paths[0])
-                    .unwrap_or_else(|| (ModelType::default(), 384))
+                DatabaseManager::read_metadata(&self.db_paths[0]).unwrap_or_else(|| {
+                    let default_model = ModelType::default();
+                    (default_model, default_model.dimensions())
+                })
             };
 
         // Load all databases

@@ -1,66 +1,64 @@
 #!/bin/bash
-# Benchmark simple de tiempos de indexación por modelo
+# Legacy wrapper: delegates to `demongrep bench` standard profile.
 
-set -e
-export DYLD_LIBRARY_PATH="/usr/local/lib:$DYLD_LIBRARY_PATH"
+set -euo pipefail
 
-DEMONGREP="./target/release/demongrep"
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-RESULTS_FILE="benchmarks/model_index_times_$TIMESTAMP.txt"
+DEMONGREP="${DEMONGREP:-./target/release/demongrep}"
+PROFILE="${BENCH_PROFILE:-standard}"
+LIMIT="${BENCH_LIMIT:-100}"
+RESULTS_DIR="benchmarks/model_comparison_$(date +%Y%m%d_%H%M%S)"
+RESULTS_MD="$RESULTS_DIR/benchmark_results.md"
+RESULTS_JSON="$RESULTS_DIR/benchmark_results.json"
 
-# Modelos a probar - empezamos con los más rápidos/prácticos
-MODELS=(
-    "minilm-l6-q"
-    "bge-small-q" 
-    "minilm-l12-q"
-    "jina-code"
-    "e5-multilingual"
-    "nomic-v1.5-q"
-    "bge-small"
-    "bge-base"
-)
+mkdir -p "$RESULTS_DIR"
 
-echo "==========================================" | tee "$RESULTS_FILE"
-echo "BENCHMARK DE INDEXACIÓN POR MODELO" | tee -a "$RESULTS_FILE"
-echo "==========================================" | tee -a "$RESULTS_FILE"
-echo "Fecha: $(date '+%Y-%m-%d %H:%M:%S')" | tee -a "$RESULTS_FILE"
-echo "" | tee -a "$RESULTS_FILE"
-echo "Modelo                  | Tiempo (s) | Chunks | Dim | DB Size" | tee -a "$RESULTS_FILE"
-echo "------------------------|------------|--------|-----|----------" | tee -a "$RESULTS_FILE"
+echo "⚠️  [DEPRECATED] benchmark_models_simple.sh now wraps 'demongrep bench'."
+echo "   Recommended direct command:"
+echo "   $DEMONGREP bench --profile standard --limit 100 --path ."
+echo ""
 
-for MODEL in "${MODELS[@]}"; do
-    echo -n "Probando $MODEL... "
-    
-    # Limpiar DB
-    rm -rf .demongrep.db
-    
-    # Medir tiempo de indexación
-    START=$(date +%s.%N)
-    
-    if $DEMONGREP --model "$MODEL" index -q 2>&1 | tail -5 > "/tmp/index_${MODEL}.log"; then
-        END=$(date +%s.%N)
-        TIME=$(echo "$END - $START" | bc)
-        
-        # Extraer estadísticas
-        CHUNKS=$(grep -oE "Total chunks: [0-9]+" "/tmp/index_${MODEL}.log" | grep -oE "[0-9]+" || echo "N/A")
-        DIMS=$(grep -oE "Dimensions: [0-9]+" "/tmp/index_${MODEL}.log" | grep -oE "[0-9]+" || echo "N/A")
-        SIZE=$(grep -oE "[0-9.]+ MB" "/tmp/index_${MODEL}.log" | head -1 || echo "N/A")
-        
-        printf "%-23s | %10.2fs | %6s | %3s | %8s\n" "$MODEL" "$TIME" "$CHUNKS" "$DIMS" "$SIZE" | tee -a "$RESULTS_FILE"
-        echo "  ✅ Completado"
-    else
-        echo "  ❌ Error"
-        printf "%-23s | %10s | %6s | %3s | %8s\n" "$MODEL" "ERROR" "-" "-" "-" | tee -a "$RESULTS_FILE"
+# Helpful default for local macOS + Homebrew setups.
+if [[ -z "${ORT_DYLIB_PATH:-}" && -f "/opt/homebrew/opt/onnxruntime/lib/libonnxruntime.1.24.1.dylib" ]]; then
+  export ORT_DYLIB_PATH="/opt/homebrew/opt/onnxruntime/lib/libonnxruntime.1.24.1.dylib"
+fi
+
+echo "Running benchmark profile '$PROFILE' (limit=$LIMIT)..."
+echo "  Markdown: $RESULTS_MD"
+echo "  JSON:     $RESULTS_JSON"
+echo ""
+
+has_opt() {
+  local name="$1"
+  shift
+  for arg in "$@"; do
+    if [[ "$arg" == "$name" || "$arg" == "$name="* ]]; then
+      return 0
     fi
-done
+  done
+  return 1
+}
 
-echo "" | tee -a "$RESULTS_FILE"
-echo "==========================================" | tee -a "$RESULTS_FILE"
-echo "Benchmark completado: $RESULTS_FILE" | tee -a "$RESULTS_FILE"
-echo "==========================================" | tee -a "$RESULTS_FILE"
+cmd=("$DEMONGREP" bench)
+if ! has_opt "--profile" "$@" && ! has_opt "--models" "$@"; then
+  cmd+=(--profile "$PROFILE")
+fi
+if ! has_opt "--limit" "$@"; then
+  cmd+=(--limit "$LIMIT")
+fi
+if ! has_opt "--path" "$@"; then
+  cmd+=(--path .)
+fi
+if ! has_opt "--output" "$@"; then
+  cmd+=(--output "$RESULTS_MD")
+fi
+if ! has_opt "--json" "$@"; then
+  cmd+=(--json)
+fi
+cmd+=("$@")
 
-# Mostrar resumen ordenado por tiempo
+"${cmd[@]}" > "$RESULTS_JSON"
+
 echo ""
-echo "🏆 RANKING POR VELOCIDAD DE INDEXACIÓN:"
-echo ""
-grep "|" "$RESULTS_FILE" | grep -v "Modelo\|----" | sort -t'|' -k2 -n | head -10
+echo "✅ Benchmark completed."
+echo "   - $RESULTS_MD"
+echo "   - $RESULTS_JSON"

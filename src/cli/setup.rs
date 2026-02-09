@@ -5,7 +5,7 @@ pub async fn run(model: Option<String>) -> Result<()> {
     let model_type = match model {
         Some(name) => ModelType::from_str(&name).ok_or_else(|| {
             anyhow!(
-                "Unknown model '{}'. Use --model with one of: minilm-l6, minilm-l6-q, minilm-l12, minilm-l12-q, paraphrase-minilm, bge-small, bge-small-q, bge-base, nomic-v1, nomic-v1.5, nomic-v1.5-q, jina-code, e5-multilingual, mxbai-large, modernbert-large",
+                "Unknown model '{}'. Use --model with one of: minilm-l6-q, bge-small-q, jina-code, mxbai-large, mxbai-xsmall",
                 name
             )
         })?,

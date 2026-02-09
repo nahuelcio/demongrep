@@ -35,6 +35,7 @@ Search your codebase using natural language queries like *"where do we handle au
   - [install-codex](#install-codex)
   - [install-opencode](#install-opencode)
   - [add-skills](#add-skills)
+  - [bench](#bench)
 - [Global Options](#global-options)
 - [Search Modes](#search-modes)
 - [MCP Server (Coding Agents)](#mcp-server-coding-agent-integration)
@@ -510,6 +511,45 @@ demongrep add-skills --dest ~/.agents/skills
 
 ---
 
+### bench
+
+Benchmark embedding models with reproducible profiles.
+
+```bash
+demongrep bench [OPTIONS]
+```
+
+#### Options
+
+| Option | Description |
+|--------|-------------|
+| `--profile` | Benchmark profile: `smoke`, `standard` (default), `full` |
+| `--models` | Comma-separated model list (overrides `--profile`) |
+| `--limit` | Max files to include in benchmark |
+| `--path` | Project path to benchmark |
+| `--output` | Save markdown report to path |
+| `--json` | Print JSON results to stdout |
+
+#### Examples
+
+```bash
+# Recommended default benchmark
+demongrep bench --profile standard --limit 100
+
+# Fast smoke check
+demongrep bench --profile smoke --limit 60
+
+# Full model sweep
+demongrep bench --profile full --output benchmarks/benchmark_results.md
+
+# Explicit model list (takes precedence over profile)
+demongrep bench --models minilm-l6-q,jina-code --profile full
+```
+
+Legacy helper scripts (`benchmark_all_models.sh`, `benchmark_models_simple.sh`) now wrap `demongrep bench`.
+
+---
+
 ## Global Options
 
 These options work with all commands:
@@ -752,18 +792,13 @@ These languages are indexed with fallback line-based chunking:
 
 | Name | ID | Dimensions | Speed | Quality | Best For |
 |------|-----|------------|-------|---------|----------|
-| MiniLM-L6 | `minilm-l6` | 384 | Fastest | Excellent | General use |
-| MiniLM-L6 (Q) | `minilm-l6-q` | 384 | Fastest | Excellent | **Default** |
-| MiniLM-L12 | `minilm-l12` | 384 | Fast | Better | Higher quality |
-| MiniLM-L12 (Q) | `minilm-l12-q` | 384 | Fast | Better | Higher quality |
-| BGE Small | `bge-small` | 384 | Fast | Good | General use |
+| MiniLM-L6 (Q) | `minilm-l6-q` | 384 | Fastest | Excellent | Fast baseline |
 | BGE Small (Q) | `bge-small-q` | 384 | Fast | Good | General use |
-| BGE Base | `bge-base` | 768 | Medium | Better | Higher quality |
-| BGE Large | `bge-large` | 1024 | Slow | Best | Highest quality |
-| Jina Code | `jina-code` | 768 | Medium | Excellent | **Code-specific** |
-| Nomic v1.5 | `nomic-v1.5` | 768 | Medium | Good | Long context |
-| E5 Multilingual | `e5-multilingual` | 384 | Fast | Good | Non-English code |
-| MxBai Large | `mxbai-large` | 1024 | Slow | Excellent | High quality |
+| Jina Code | `jina-code` | 768 | Medium | Excellent | **Default**, code-specific search |
+| Mixedbread XSmall | `mxbai-xsmall` | 384 | Fast | Good | Lightweight mixedbread option |
+| Mixedbread Large | `mxbai-large` | 1024 | Slow | High | Highest quality retrieval |
+
+Legacy model IDs are accepted as aliases and mapped to the active model set above.
 
 ### Changing Models
 
@@ -877,6 +912,15 @@ demongrep index --force --model minilm-l6-q
 ```bash
 # Reduce batch size
 DEMONGREP_BATCH_SIZE=32 demongrep index
+```
+
+### ONNX Runtime dylib not found (macOS)
+
+If you see `Failed to load ONNX Runtime dylib`:
+
+```bash
+export ORT_DYLIB_PATH=/opt/homebrew/opt/onnxruntime/lib/libonnxruntime.1.24.1.dylib
+demongrep bench --profile smoke
 ```
 
 ### Server won't start (port in use)

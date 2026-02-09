@@ -1,11 +1,11 @@
 //! Benchmark framework for comparing embedding models.
 //!
 //! Measures performance (throughput, latency), quality (accuracy, false positives),
-//! and memory (RSS delta, estimated DB size) across all supported models.
+//! and memory (RSS delta, estimated DB size) across benchmark model profiles.
 
 use anyhow::Result;
 use colored::Colorize;
-use rayon::prelude::*;
+// NOTE: Rayon intentionally not used here - see comment below about ONNX thread pool conflict
 use serde::Serialize;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -32,6 +32,35 @@ const TEST_QUERIES: &[(&str, &str)] = &[
 
 const FALSE_POSITIVE_QUERY: &str = "kubernetes deployment yaml helm chart";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BenchProfile {
+    Smoke,
+    Standard,
+    Full,
+}
+
+impl BenchProfile {
+    pub fn from_str(profile: &str) -> Result<Self> {
+        match profile.to_lowercase().as_str() {
+            "smoke" => Ok(Self::Smoke),
+            "standard" => Ok(Self::Standard),
+            "full" => Ok(Self::Full),
+            _ => Err(anyhow::anyhow!(
+                "Invalid profile '{}'. Available: smoke, standard, full",
+                profile
+            )),
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Smoke => "smoke",
+            Self::Standard => "standard",
+            Self::Full => "full",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct BenchResult {
     pub model_name: String,
@@ -40,6 +69,8 @@ pub struct BenchResult {
     pub quantized: bool,
     // Performance
     pub model_load_ms: u64,
+    pub embed_total_ms: u64,
+    pub query_eval_ms: u64,
     pub embed_throughput: f32,
     pub avg_query_ms: f64,
     pub total_index_ms: u64,
@@ -77,11 +108,53 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     dot / (mag_a * mag_b)
 }
 
+fn models_for_profile(profile: BenchProfile) -> Vec<ModelType> {
+    match profile {
+        BenchProfile::Smoke => vec![ModelType::AllMiniLML6V2Q, ModelType::BGESmallENV15Q],
+        BenchProfile::Standard => vec![
+            ModelType::AllMiniLML6V2Q,
+            ModelType::BGESmallENV15Q,
+            ModelType::JinaEmbeddingsV2BaseCode,
+        ],
+        BenchProfile::Full => ModelType::all().to_vec(),
+    }
+}
+
+fn select_models(models_filter: Option<&str>, profile: BenchProfile) -> Result<Vec<ModelType>> {
+    if let Some(filter) = models_filter {
+        let mut parsed = Vec::new();
+        for name in filter.split(',') {
+            let name = name.trim();
+            match ModelType::from_str(name) {
+                Some(m) => parsed.push(m),
+                None => {
+                    eprintln!("Unknown model: '{}', skipping", name);
+                }
+            }
+        }
+
+        if parsed.is_empty() {
+            return Err(anyhow::anyhow!(
+                "No valid models specified. Available: {}",
+                ModelType::all()
+                    .iter()
+                    .map(|m| m.short_name())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+
+        Ok(parsed)
+    } else {
+        Ok(models_for_profile(profile))
+    }
+}
+
 /// Benchmark a single model against pre-chunked data
 fn benchmark_model(
     model_type: ModelType,
     chunks: &[Chunk],
-    prepared_texts: &[String],
+    base_prepared_texts: &[String],
 ) -> Result<BenchResult> {
     let chunks_count = chunks.len();
 
@@ -102,19 +175,41 @@ fn benchmark_model(
         model_load_ms, rss_delta_mb
     );
 
+    if model_type.dimensions() >= 1024 && !model_type.is_quantized() {
+        println!(
+            "   ℹ️  Tip: {} is a heavy model ({} dims). Use `--profile standard` for faster runs.",
+            model_type.short_name(),
+            model_type.dimensions()
+        );
+    }
+
+    let model_prepared_storage = if model_type.has_special_passage_format() {
+        Some(
+            base_prepared_texts
+                .iter()
+                .map(|text| model_type.format_passage(text))
+                .collect::<Vec<_>>(),
+        )
+    } else {
+        None
+    };
+    let prepared_texts = model_prepared_storage
+        .as_deref()
+        .unwrap_or(base_prepared_texts);
+
     // 4. Embed all chunks
     let start = Instant::now();
-    let embeddings = embedder.embed_batch(prepared_texts.to_vec())?;
-    let total_index_ms = start.elapsed().as_millis() as u64;
-    let embed_throughput = if total_index_ms > 0 {
-        chunks_count as f32 / (total_index_ms as f32 / 1000.0)
+    let embeddings = embedder.embed_batch_refs(prepared_texts)?;
+    let embed_total_ms = start.elapsed().as_millis() as u64;
+    let embed_throughput = if embed_total_ms > 0 {
+        chunks_count as f32 / (embed_total_ms as f32 / 1000.0)
     } else {
         0.0
     };
 
     println!(
         "   Embedded {} chunks in {}ms ({:.0} ch/sec)",
-        chunks_count, total_index_ms, embed_throughput
+        chunks_count, embed_total_ms, embed_throughput
     );
 
     // 5. Run accuracy tests
@@ -124,8 +219,10 @@ fn benchmark_model(
 
     for (query, expected_file) in TEST_QUERIES {
         let start = Instant::now();
-        let query_embedding = embedder.embed_one(query)?;
-        query_times.push(start.elapsed());
+        let formatted_query = model_type.format_query(query);
+        let query_embedding = embedder.embed_one(&formatted_query)?;
+        let query_elapsed = start.elapsed();
+        query_times.push(query_elapsed);
 
         // Find best match via brute-force cosine similarity
         let mut best_score = 0.0f32;
@@ -167,7 +264,10 @@ fn benchmark_model(
     }
 
     // 6. False positive test
-    let fp_embedding = embedder.embed_one(FALSE_POSITIVE_QUERY)?;
+    let fp_start = Instant::now();
+    let fp_query = model_type.format_query(FALSE_POSITIVE_QUERY);
+    let fp_embedding = embedder.embed_one(&fp_query)?;
+    let fp_elapsed = fp_start.elapsed();
     let false_positive_score = embeddings
         .iter()
         .map(|emb| cosine_similarity(&fp_embedding, emb))
@@ -181,10 +281,16 @@ fn benchmark_model(
     } else {
         query_times.iter().sum::<Duration>().as_secs_f64() * 1000.0 / query_times.len() as f64
     };
+    let query_eval_ms = (query_times.iter().sum::<Duration>() + fp_elapsed).as_millis() as u64;
+    let total_index_ms = embed_total_ms;
+
+    println!(
+        "   Query eval in {}ms ({:.1} ms/query avg)",
+        query_eval_ms, avg_query_ms
+    );
 
     // 7. Estimated DB size (vectors only: dims * chunks * 4 bytes)
-    let estimated_db_mb =
-        (model_type.dimensions() * chunks_count * 4) as f64 / (1024.0 * 1024.0);
+    let estimated_db_mb = (model_type.dimensions() * chunks_count * 4) as f64 / (1024.0 * 1024.0);
 
     // Drop embedder to free memory before next model
     drop(embedder);
@@ -196,6 +302,8 @@ fn benchmark_model(
         dimensions: model_type.dimensions(),
         quantized: model_type.is_quantized(),
         model_load_ms,
+        embed_total_ms,
+        query_eval_ms,
         embed_throughput,
         avg_query_ms,
         total_index_ms,
@@ -229,18 +337,19 @@ fn print_summary_table(results: &[BenchResult]) {
 
     // Header
     println!(
-        "{:<18} {:>5} {:>5} {:>8} {:>8} {:>8} {:>5} {:>6} {:>7}",
+        "{:<18} {:>5} {:>5} {:>8} {:>8} {:>8} {:>8} {:>5} {:>6} {:>7}",
         "Model".bold(),
         "Dims".bold(),
         "Quant".bold(),
         "Load".bold(),
+        "Embed".bold(),
         "ch/sec".bold(),
-        "qry(ms)".bold(),
+        "qeval".bold(),
         "Acc".bold(),
         "FP".bold(),
         "RSS".bold(),
     );
-    println!("{}", "─".repeat(88));
+    println!("{}", "─".repeat(103));
 
     // Sort by accuracy desc, then throughput desc
     let mut sorted: Vec<&BenchResult> = results.iter().collect();
@@ -275,20 +384,21 @@ fn print_summary_table(results: &[BenchResult]) {
         };
 
         println!(
-            "{:<18} {:>5} {:>5} {:>6}ms {:>8.0} {:>8.1} {:>5} {:>6} {:>5.0}MB",
+            "{:<18} {:>5} {:>5} {:>6}ms {:>6}ms {:>8.0} {:>6}ms {:>5} {:>6} {:>5.0}MB",
             r.short_name,
             r.dimensions,
             if r.quantized { "yes" } else { "no" },
             r.model_load_ms,
+            r.embed_total_ms,
             r.embed_throughput,
-            r.avg_query_ms,
+            r.query_eval_ms,
             acc_colored,
             fp_colored,
             r.rss_delta_mb,
         );
     }
 
-    println!("{}", "─".repeat(88));
+    println!("{}", "─".repeat(103));
 
     // Winners
     if let Some(best_acc) = sorted.iter().max_by(|a, b| {
@@ -348,16 +458,18 @@ fn save_markdown_report(results: &[BenchResult], path: &std::path::Path) -> Resu
 
     // Summary table
     md.push_str("## Summary\n\n");
-    md.push_str("| Model | Dims | Quant | Load(ms) | ch/sec | qry(ms) | Accuracy | Avg Score | FP Score | RSS(MB) | Est DB(MB) |\n");
-    md.push_str("|-------|------|-------|----------|--------|---------|----------|-----------|----------|---------|------------|\n");
+    md.push_str("| Model | Dims | Quant | Load(ms) | Embed(ms) | QueryEval(ms) | ch/sec | qry(ms) | Accuracy | Avg Score | FP Score | RSS(MB) | Est DB(MB) |\n");
+    md.push_str("|-------|------|-------|----------|-----------|---------------|--------|---------|----------|-----------|----------|---------|------------|\n");
 
     for r in results {
         md.push_str(&format!(
-            "| {} | {} | {} | {} | {:.0} | {:.1} | {:.0}% | {:.3} | {:.3} | {:.0} | {:.1} |\n",
+            "| {} | {} | {} | {} | {} | {} | {:.0} | {:.1} | {:.0}% | {:.3} | {:.3} | {:.0} | {:.1} |\n",
             r.short_name,
             r.dimensions,
             if r.quantized { "yes" } else { "no" },
             r.model_load_ms,
+            r.embed_total_ms,
+            r.query_eval_ms,
             r.embed_throughput,
             r.avg_query_ms,
             r.accuracy * 100.0,
@@ -376,15 +488,14 @@ fn save_markdown_report(results: &[BenchResult], path: &std::path::Path) -> Resu
         md.push_str(&format!("- **Dimensions**: {}\n", r.dimensions));
         md.push_str(&format!("- **Quantized**: {}\n", r.quantized));
         md.push_str(&format!("- **Model load**: {} ms\n", r.model_load_ms));
+        md.push_str(&format!("- **Embed total**: {} ms\n", r.embed_total_ms));
+        md.push_str(&format!("- **Query eval total**: {} ms\n", r.query_eval_ms));
         md.push_str(&format!(
             "- **Embedding throughput**: {:.0} chunks/sec\n",
             r.embed_throughput
         ));
         md.push_str(&format!("- **Avg query time**: {:.1} ms\n", r.avg_query_ms));
-        md.push_str(&format!(
-            "- **Accuracy**: {:.0}%\n",
-            r.accuracy * 100.0
-        ));
+        md.push_str(&format!("- **Accuracy**: {:.0}%\n", r.accuracy * 100.0));
         md.push_str(&format!("- **Avg score**: {:.3}\n", r.avg_score));
         md.push_str(&format!(
             "- **False positive score**: {:.3}\n",
@@ -403,40 +514,18 @@ fn save_markdown_report(results: &[BenchResult], path: &std::path::Path) -> Resu
     Ok(())
 }
 
-/// Run benchmark across selected (or all) models
+/// Run benchmark across selected models or a predefined benchmark profile.
 pub async fn bench(
     models_filter: Option<String>,
+    profile: String,
     limit: Option<usize>,
     path: Option<PathBuf>,
     output: Option<PathBuf>,
     json_output: bool,
 ) -> Result<()> {
-    // Parse model list
-    let models: Vec<ModelType> = if let Some(filter) = &models_filter {
-        let mut parsed = Vec::new();
-        for name in filter.split(',') {
-            let name = name.trim();
-            match ModelType::from_str(name) {
-                Some(m) => parsed.push(m),
-                None => {
-                    eprintln!("Unknown model: '{}', skipping", name);
-                }
-            }
-        }
-        if parsed.is_empty() {
-            return Err(anyhow::anyhow!(
-                "No valid models specified. Available: {}",
-                ModelType::all()
-                    .iter()
-                    .map(|m| m.short_name())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-        }
-        parsed
-    } else {
-        ModelType::all().to_vec()
-    };
+    let profile = BenchProfile::from_str(&profile)?;
+    let models = select_models(models_filter.as_deref(), profile)?;
+    let using_custom_model_list = models_filter.is_some();
 
     if !json_output {
         println!(
@@ -452,6 +541,11 @@ pub async fn bench(
             "╚════════════════════════════════════════════════════════════════╝".bright_cyan()
         );
         println!();
+        if using_custom_model_list {
+            println!("Profile: custom (--models takes precedence over --profile)");
+        } else {
+            println!("Profile: {}", profile.as_str());
+        }
         println!("Models to benchmark: {}", models.len());
         for m in &models {
             println!(
@@ -498,12 +592,18 @@ pub async fn bench(
     }
 
     if all_chunks.is_empty() {
-        return Err(anyhow::anyhow!("No chunks created. Is this a code project?"));
+        return Err(anyhow::anyhow!(
+            "No chunks created. Is this a code project?"
+        ));
     }
 
     // Prepare texts once (uses same logic as real indexing)
-    let prepared_texts: Vec<String> = all_chunks
-        .par_iter()
+    // CRITICAL: Use iter() instead of par_iter() here. ONNX Runtime creates its own
+    // thread pool based on available parallelism. If Rayon threads are active when
+    // ONNX tries to create/use its threads, it can cause a deadlock due to thread
+    // pool exhaustion. This is a known issue when mixing Rayon with ONNX Runtime.
+    let base_prepared_texts: Vec<String> = all_chunks
+        .iter()
         .map(|chunk| BatchEmbedder::prepare_text(chunk))
         .collect();
 
@@ -514,17 +614,13 @@ pub async fn bench(
         if !json_output {
             println!(
                 "{}",
-                format!(
-                    "━━━ [{}/{}] {} ━━━",
-                    i + 1,
-                    models.len(),
-                    model_type.name()
-                )
-                .bright_cyan()
+                format!("━━━ [{}/{}] {} ━━━", i + 1, models.len(), model_type.name()).bright_cyan()
             );
         }
 
-        match benchmark_model(*model_type, &all_chunks, &prepared_texts) {
+        // Run benchmark directly - ONNX Runtime has its own thread management
+        let model_type = *model_type;
+        match benchmark_model(model_type, &all_chunks, &base_prepared_texts) {
             Ok(result) => results.push(result),
             Err(e) => {
                 if !json_output {
@@ -555,4 +651,45 @@ pub async fn bench(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_profile_model_selection() {
+        let smoke = select_models(None, BenchProfile::Smoke).unwrap();
+        assert_eq!(
+            smoke,
+            vec![ModelType::AllMiniLML6V2Q, ModelType::BGESmallENV15Q]
+        );
+
+        let standard = select_models(None, BenchProfile::Standard).unwrap();
+        assert!(standard.contains(&ModelType::AllMiniLML6V2Q));
+        assert!(standard.contains(&ModelType::JinaEmbeddingsV2BaseCode));
+        assert!(standard.contains(&ModelType::BGESmallENV15Q));
+        assert_eq!(standard.len(), 3);
+
+        let full = select_models(None, BenchProfile::Full).unwrap();
+        assert_eq!(full.len(), ModelType::all().len());
+    }
+
+    #[test]
+    fn test_models_filter_precedence() {
+        let selected = select_models(Some("minilm-l6-q,jina-code"), BenchProfile::Full).unwrap();
+        assert_eq!(
+            selected,
+            vec![
+                ModelType::AllMiniLML6V2Q,
+                ModelType::JinaEmbeddingsV2BaseCode
+            ]
+        );
+    }
+
+    #[test]
+    fn test_invalid_profile() {
+        let err = BenchProfile::from_str("fastest").unwrap_err().to_string();
+        assert!(err.contains("Invalid profile"));
+    }
 }
