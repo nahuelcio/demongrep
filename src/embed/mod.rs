@@ -153,7 +153,7 @@ mod tests {
     #[test]
     fn test_model_type_default() {
         let model = ModelType::default();
-        assert_eq!(model.dimensions(), 768);
+        assert_eq!(model.dimensions(), 384);
     }
 
     #[test]
@@ -163,7 +163,7 @@ mod tests {
         assert!(service.is_ok());
 
         let service = service.unwrap();
-        assert_eq!(service.dimensions(), 768);
+        assert_eq!(service.dimensions(), 384);
     }
 
     #[test]
@@ -172,7 +172,7 @@ mod tests {
         let mut service = EmbeddingService::new().unwrap();
         let query_embedding = service.embed_query("find authentication code").unwrap();
 
-        assert_eq!(query_embedding.len(), 768);
+        assert_eq!(query_embedding.len(), 384);
     }
 
     #[test]
