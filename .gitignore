@@ -28,6 +28,8 @@ criterion/
 
 # Testing
 /test-repos/
+/.tmp/
+itest-*/
 ideas/analisis_mejoras.md
 .osgrep
 benchmark_*.md
