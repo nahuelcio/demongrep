@@ -857,8 +857,8 @@ These languages are indexed with fallback line-based chunking:
 |------|-----|------------|-------|---------|----------|
 | MiniLM-L6 (Q) | `minilm-l6-q` | 384 | Fastest | Excellent | Fast baseline |
 | BGE Small (Q) | `bge-small-q` | 384 | Fast | Good | General use |
-| Jina V5 Nano | `jina-v5-nano` | 768 | Fast | Excellent | **Default**, local semantic code search |
-| Jina Code | `jina-code` | 768 | Medium | Excellent | Code-specialized alternative |
+| Jina Code | `jina-code` | 768 | Medium | Excellent | **Default**, code-specialized semantic search |
+| Jina V5 Nano | `jina-v5-nano` | 768 | Fast | Excellent | Alternative (requires ONNX export availability) |
 | Mixedbread XSmall | `mxbai-xsmall` | 384 | Fast | Good | Lightweight mixedbread option |
 | Mixedbread Large | `mxbai-large` | 1024 | Slow | High | Highest quality retrieval |
 
@@ -947,12 +947,11 @@ demongrep also respects `.gitignore` and `.osgrepignore` files.
 demongrep index
 ```
 
-### Setup fails downloading `jina-v5-nano` ONNX
+### Setup fails downloading a model ONNX
 
-If Hugging Face does not provide an ONNX export under expected paths for the selected model,
-demongrep now fails setup for `jina-v5-nano` instead of silently switching models.
+If Hugging Face does not provide a public ONNX export for the selected model (e.g. `jina-v5-nano`), setup will fail with HTTP 404 errors.
 
-You can choose another explicit model when needed:
+The default model is `jina-code`, which uses a built-in fastembed ONNX export and always works. Use it explicitly if needed:
 
 ```bash
 demongrep setup --model jina-code

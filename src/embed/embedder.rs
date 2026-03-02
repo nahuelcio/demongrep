@@ -152,8 +152,8 @@ impl ModelType {
 
 impl Default for ModelType {
     fn default() -> Self {
-        // Default to Jina v5 nano for fast local indexing/search quality.
-        Self::JinaEmbeddingsV5TextNano
+        // Default to Jina Code: built-in fastembed model, 768 dims, reliable ONNX export.
+        Self::JinaEmbeddingsV2BaseCode
     }
 }
 
