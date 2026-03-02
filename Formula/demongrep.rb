@@ -1,8 +1,8 @@
 class Demongrep < Formula
   desc "Fast, local semantic code search powered by Rust"
   homepage "https://github.com/nahuelcio/demongrep"
-  url "https://github.com/nahuelcio/demongrep/archive/refs/tags/v1.9.0.tar.gz"
-  sha256 "6fa95fa546c67d83d61017dda8df2e29c63fdd403c379534667b9cf6f9f7a175"
+  url "https://github.com/nahuelcio/demongrep/archive/refs/tags/v1.9.1.tar.gz"
+  sha256 "1fdf2e8cdacdaeca41004eddbdebaf0fe0cc831e2f086770d81a19935666"
   license "Apache-2.0"
   head "https://github.com/nahuelcio/demongrep.git", branch: "master"
 
