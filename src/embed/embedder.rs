@@ -16,6 +16,8 @@ pub enum ModelType {
     BGESmallENV15Q,
     /// Jina Embeddings v2 Base Code - 768 dimensions, optimized for code
     JinaEmbeddingsV2BaseCode,
+    /// Jina Embeddings v5 Text Nano - 768 dimensions, local ONNX by default
+    JinaEmbeddingsV5TextNano,
     /// Mixedbread Embed Large v1 - 1024 dimensions, high quality general retrieval
     MxbaiEmbedLargeV1,
     /// Mixedbread Embed XSmall v1 - 384 dimensions, lightweight mixedbread model
@@ -30,7 +32,7 @@ impl ModelType {
             Self::JinaEmbeddingsV2BaseCode => Some(FastEmbedModel::JinaEmbeddingsV2BaseCode),
             Self::MxbaiEmbedLargeV1 => Some(FastEmbedModel::MxbaiEmbedLargeV1),
             // Not included in fastembed's built-in enum in v5.8.1; loaded via user-defined path.
-            Self::MxbaiEmbedXSmallV1 => None,
+            Self::MxbaiEmbedXSmallV1 | Self::JinaEmbeddingsV5TextNano => None,
         }
     }
 
@@ -39,7 +41,7 @@ impl ModelType {
             // 384 dimensions
             Self::AllMiniLML6V2Q | Self::BGESmallENV15Q | Self::MxbaiEmbedXSmallV1 => 384,
             // 768 dimensions
-            Self::JinaEmbeddingsV2BaseCode => 768,
+            Self::JinaEmbeddingsV2BaseCode | Self::JinaEmbeddingsV5TextNano => 768,
             // 1024 dimensions
             Self::MxbaiEmbedLargeV1 => 1024,
         }
@@ -50,6 +52,7 @@ impl ModelType {
             Self::AllMiniLML6V2Q => "sentence-transformers/all-MiniLM-L6-v2 (quantized)",
             Self::BGESmallENV15Q => "BAAI/bge-small-en-v1.5 (quantized)",
             Self::JinaEmbeddingsV2BaseCode => "jinaai/jina-embeddings-v2-base-code",
+            Self::JinaEmbeddingsV5TextNano => "jinaai/jina-embeddings-v5-text-nano",
             Self::MxbaiEmbedLargeV1 => "mixedbread-ai/mxbai-embed-large-v1",
             Self::MxbaiEmbedXSmallV1 => "mixedbread-ai/mxbai-embed-xsmall-v1",
         }
@@ -97,6 +100,7 @@ impl ModelType {
             Self::AllMiniLML6V2Q => "minilm-l6-q",
             Self::BGESmallENV15Q => "bge-small-q",
             Self::JinaEmbeddingsV2BaseCode => "jina-code",
+            Self::JinaEmbeddingsV5TextNano => "jina-v5-nano",
             Self::MxbaiEmbedLargeV1 => "mxbai-large",
             Self::MxbaiEmbedXSmallV1 => "mxbai-xsmall",
         }
@@ -108,6 +112,7 @@ impl ModelType {
             Self::AllMiniLML6V2Q,
             Self::BGESmallENV15Q,
             Self::JinaEmbeddingsV2BaseCode,
+            Self::JinaEmbeddingsV5TextNano,
             Self::MxbaiEmbedLargeV1,
             Self::MxbaiEmbedXSmallV1,
         ]
@@ -129,6 +134,10 @@ impl ModelType {
             "nomic-v1.5" | "nomicembedtextv15" => Some(Self::JinaEmbeddingsV2BaseCode),
             "nomic-v1.5-q" | "nomicembedtextv15q" => Some(Self::JinaEmbeddingsV2BaseCode),
             "jina-code" | "jinaembeddingsv2basecode" => Some(Self::JinaEmbeddingsV2BaseCode),
+            "jina-v5-nano"
+            | "jinav5nano"
+            | "jina-embeddings-v5-text-nano"
+            | "jinaai/jina-embeddings-v5-text-nano" => Some(Self::JinaEmbeddingsV5TextNano),
             "e5-multilingual" | "multilinguale5small" => Some(Self::BGESmallENV15Q),
             "mxbai-large" | "mxbaiembedlargev1" => Some(Self::MxbaiEmbedLargeV1),
             "mxbai-xsmall"
@@ -143,8 +152,8 @@ impl ModelType {
 
 impl Default for ModelType {
     fn default() -> Self {
-        // Default to the code-specialized Jina model for best code understanding.
-        Self::JinaEmbeddingsV2BaseCode
+        // Default to Jina v5 nano for fast local indexing/search quality.
+        Self::JinaEmbeddingsV5TextNano
     }
 }
 
@@ -170,7 +179,16 @@ impl FastEmbedder {
                 InitOptions::new(fast_model).with_show_download_progress(true),
             )
             .map_err(|e| anyhow!("Failed to initialize embedding model: {}", e))?,
-            None => Self::load_mxbai_xsmall_user_defined()?,
+            None => match model_type {
+                ModelType::MxbaiEmbedXSmallV1 => Self::load_mxbai_xsmall_user_defined()?,
+                ModelType::JinaEmbeddingsV5TextNano => Self::load_jina_v5_text_nano_user_defined()?,
+                _ => {
+                    return Err(anyhow!(
+                        "Model {} requires a user-defined loader that is not implemented",
+                        model_type.name()
+                    ))
+                }
+            },
         };
 
         info_print!("✅ Model loaded successfully!");
@@ -197,6 +215,85 @@ impl FastEmbedder {
             .join("user-defined")
             .join("mixedbread-ai")
             .join("mxbai-embed-xsmall-v1");
+
+        let read_repo_file = |name: &str| -> Result<Vec<u8>> {
+            let local_path = model_cache.join(name);
+            if local_path.exists() {
+                return std::fs::read(&local_path).with_context(|| {
+                    format!("Failed to read cached file {}", local_path.display())
+                });
+            }
+
+            if let Some(parent) = local_path.parent() {
+                std::fs::create_dir_all(parent).with_context(|| {
+                    format!("Failed to create cache directory {}", parent.display())
+                })?;
+            }
+
+            let url = format!("{}/{}/resolve/main/{}", endpoint, MODEL_REPO, name);
+            let mut request = ureq::get(&url);
+            if let Ok(token) = std::env::var("HF_TOKEN") {
+                if !token.trim().is_empty() {
+                    request = request.set("Authorization", &format!("Bearer {}", token));
+                }
+            }
+
+            let response = request
+                .call()
+                .map_err(|e| anyhow!("Failed HTTP request for {}: {}", url, e))?;
+            let mut reader = response.into_reader();
+            let mut bytes = Vec::new();
+            reader
+                .read_to_end(&mut bytes)
+                .with_context(|| format!("Failed to read response body for {}", url))?;
+
+            std::fs::write(&local_path, &bytes)
+                .with_context(|| format!("Failed to write cached file {}", local_path.display()))?;
+            Ok(bytes)
+        };
+
+        let tokenizer_files = TokenizerFiles {
+            tokenizer_file: read_repo_file(TOKENIZER_JSON)?,
+            config_file: read_repo_file(CONFIG_JSON)?,
+            special_tokens_map_file: read_repo_file(SPECIAL_TOKENS_MAP_JSON)?,
+            tokenizer_config_file: read_repo_file(TOKENIZER_CONFIG_JSON)?,
+        };
+        let onnx_file = read_repo_file(ONNX_FILE)?;
+
+        let model = UserDefinedEmbeddingModel::new(onnx_file, tokenizer_files)
+            .with_pooling(Pooling::Mean)
+            .with_quantization(QuantizationMode::None);
+
+        TextEmbedding::try_new_from_user_defined(model, InitOptionsUserDefined::new()).map_err(
+            |e| {
+                anyhow!(
+                    "Failed to initialize custom model {} with fastembed user-defined loader: {}",
+                    MODEL_REPO,
+                    e
+                )
+            },
+        )
+    }
+
+    fn load_jina_v5_text_nano_user_defined() -> Result<TextEmbedding> {
+        const MODEL_REPO: &str = "jinaai/jina-embeddings-v5-text-nano";
+        const ONNX_FILE: &str = "onnx/model.onnx";
+        const TOKENIZER_JSON: &str = "tokenizer.json";
+        const CONFIG_JSON: &str = "config.json";
+        const SPECIAL_TOKENS_MAP_JSON: &str = "special_tokens_map.json";
+        const TOKENIZER_CONFIG_JSON: &str = "tokenizer_config.json";
+
+        let endpoint =
+            std::env::var("HF_ENDPOINT").unwrap_or_else(|_| "https://huggingface.co".to_string());
+        let endpoint = endpoint.trim_end_matches('/');
+
+        let cache_root = std::env::var("FASTEMBED_CACHE_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from(fastembed::get_cache_dir()));
+        let model_cache = cache_root
+            .join("user-defined")
+            .join("jinaai")
+            .join("jina-embeddings-v5-text-nano");
 
         let read_repo_file = |name: &str| -> Result<Vec<u8>> {
             let local_path = model_cache.join(name);
@@ -362,6 +459,7 @@ mod tests {
         assert_eq!(ModelType::MxbaiEmbedXSmallV1.dimensions(), 384);
         // 768 dimension models
         assert_eq!(ModelType::JinaEmbeddingsV2BaseCode.dimensions(), 768);
+        assert_eq!(ModelType::JinaEmbeddingsV5TextNano.dimensions(), 768);
         // 1024 dimension models
         assert_eq!(ModelType::MxbaiEmbedLargeV1.dimensions(), 1024);
     }
@@ -381,14 +479,14 @@ mod tests {
     #[test]
     fn test_default_model() {
         let model = ModelType::default();
-        assert_eq!(model, ModelType::JinaEmbeddingsV2BaseCode);
+        assert_eq!(model, ModelType::JinaEmbeddingsV5TextNano);
         assert_eq!(model.dimensions(), 768);
     }
 
     #[test]
     fn test_all_models() {
         let all = ModelType::all();
-        assert_eq!(all.len(), 5);
+        assert_eq!(all.len(), 6);
     }
 
     #[test]
@@ -400,6 +498,10 @@ mod tests {
         assert_eq!(
             ModelType::from_str("jina-code"),
             Some(ModelType::JinaEmbeddingsV2BaseCode)
+        );
+        assert_eq!(
+            ModelType::from_str("jina-v5-nano"),
+            Some(ModelType::JinaEmbeddingsV5TextNano)
         );
         assert_eq!(
             ModelType::from_str("minilm-l6-q"),
@@ -425,6 +527,7 @@ mod tests {
         assert!(ModelType::AllMiniLML6V2Q.is_quantized());
         assert!(ModelType::BGESmallENV15Q.is_quantized());
         assert!(!ModelType::JinaEmbeddingsV2BaseCode.is_quantized());
+        assert!(!ModelType::JinaEmbeddingsV5TextNano.is_quantized());
         assert!(!ModelType::MxbaiEmbedLargeV1.is_quantized());
         assert!(!ModelType::MxbaiEmbedXSmallV1.is_quantized());
     }

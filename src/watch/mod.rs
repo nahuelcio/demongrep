@@ -71,6 +71,7 @@ impl FileWatcher {
 
         // Add common ignore patterns
         let _ = builder.add_line(None, ".git");
+        let _ = builder.add_line(None, ".demongrep");
         let _ = builder.add_line(None, ".demongrep.db");
         let _ = builder.add_line(None, "node_modules");
         let _ = builder.add_line(None, "target");

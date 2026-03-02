@@ -28,6 +28,7 @@ Search your codebase using natural language queries like *"where do we handle au
   - [mcp](#mcp)
   - [stats](#stats)
   - [clear](#clear)
+  - [migrate-index](#migrate-index)
   - [list](#list)
   - [doctor](#doctor)
   - [setup](#setup)
@@ -322,7 +323,8 @@ demongrep index --model jina-code
 
 #### Index Location
 
-The index is stored in `.demongrep.db/` directory inside your project root.
+The index is stored in `.demongrep/store/` directory inside your project root.
+Legacy `.demongrep.db/` indexes are still supported.
 
 ---
 
@@ -388,7 +390,7 @@ demongrep stats [PATH]
 ```
 📊 Database Statistics
 ============================================================
-💾 Database: /path/to/project/.demongrep.db
+💾 Database: /path/to/project/.demongrep/store
 
 Vector Store:
    Total chunks: 731
@@ -432,9 +434,35 @@ demongrep clear /path/to/project -y
 
 ---
 
+### migrate-index
+
+Migrate a legacy local index from `.demongrep.db/` to `.demongrep/store/`.
+
+```bash
+demongrep migrate-index [PATH] [OPTIONS]
+```
+
+#### Options
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--yes` | `-y` | Skip confirmation prompt |
+
+#### Examples
+
+```bash
+# Migrate current project local index
+demongrep migrate-index
+
+# Migrate without prompt
+demongrep migrate-index -y
+```
+
+---
+
 ### list
 
-List all indexed repositories (searches for `.demongrep.db` directories).
+List all indexed repositories (searches local `.demongrep/store` and legacy `.demongrep.db`).
 
 ```bash
 demongrep list
@@ -725,7 +753,13 @@ curl -X POST http://localhost:4444/search \
 
 ### Index Location
 
-Each project has its own index at `<project_root>/.demongrep.db/`
+Each project has its own index at `<project_root>/.demongrep/store/`
+
+If you still have a legacy index at `<project_root>/.demongrep.db/`, migrate it with:
+
+```bash
+demongrep migrate-index
+```
 
 ### Re-indexing
 
@@ -750,7 +784,7 @@ demongrep clear
 demongrep clear -y
 
 # Or manually
-rm -rf .demongrep.db/
+rm -rf .demongrep/
 ```
 
 ### Check Index Status
@@ -808,7 +842,8 @@ These languages are indexed with fallback line-based chunking:
 |------|-----|------------|-------|---------|----------|
 | MiniLM-L6 (Q) | `minilm-l6-q` | 384 | Fastest | Excellent | Fast baseline |
 | BGE Small (Q) | `bge-small-q` | 384 | Fast | Good | General use |
-| Jina Code | `jina-code` | 768 | Medium | Excellent | **Default**, code-specific search |
+| Jina V5 Nano | `jina-v5-nano` | 768 | Fast | Excellent | **Default**, local semantic code search |
+| Jina Code | `jina-code` | 768 | Medium | Excellent | Code-specialized alternative |
 | Mixedbread XSmall | `mxbai-xsmall` | 384 | Fast | Good | Lightweight mixedbread option |
 | Mixedbread Large | `mxbai-large` | 1024 | Slow | High | Highest quality retrieval |
 
@@ -835,6 +870,7 @@ demongrep search "query" --model jina-code
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `DEMONGREP_BATCH_SIZE` | Embedding batch size | Auto (based on model) |
+| `DEMONGREP_VECTOR_BACKEND` | Vector backend (`arroy` or `zvec`) | `arroy` |
 | `RUST_LOG` | Logging level | `demongrep=info` |
 
 ### Ignore Files
@@ -880,7 +916,7 @@ demongrep also respects `.gitignore` and `.osgrepignore` files.
 ### 4. Vector Storage
 - arroy for approximate nearest neighbor search
 - LMDB for ACID transactions and persistence
-- Single `.demongrep.db/` directory per project
+- Single `.demongrep/store/` directory per project
 
 ### 5. Search
 - Query embedding → Vector search → BM25 search → RRF fusion → (Optional) Reranking

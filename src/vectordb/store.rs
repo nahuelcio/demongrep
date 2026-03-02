@@ -1,5 +1,6 @@
 use crate::embed::EmbeddedChunk;
 use crate::info_print;
+use crate::vectordb::{requested_backend, selected_backend};
 use anyhow::{anyhow, Result};
 use arroy::distances::Cosine;
 use arroy::{Database as ArroyDatabase, ItemId, Reader, Writer};
@@ -107,10 +108,20 @@ impl VectorStore {
     /// Create or open a vector store
     ///
     /// # Arguments
-    /// * `db_path` - Path to the database directory (e.g., ".demongrep.db")
+    /// * `db_path` - Path to the database directory (e.g., ".demongrep/store")
     /// * `dimensions` - Dimensionality of embeddings (e.g., 384, 768)
     pub fn new(db_path: &Path, dimensions: usize) -> Result<Self> {
         info_print!("📦 Opening vector database at: {}", db_path.display());
+        let active_backend = selected_backend();
+        info_print!("🧩 Vector backend: {}", active_backend.as_str());
+
+        if let Some(requested) = requested_backend() {
+            if requested.eq_ignore_ascii_case("zvec") && active_backend.as_str() != "zvec" {
+                info_print!(
+                    "⚠️  DEMONGREP_VECTOR_BACKEND=zvec requested but zvec feature is not enabled; using arroy"
+                );
+            }
+        }
 
         // Create database directory (LMDB expects a directory, not a file)
         std::fs::create_dir_all(db_path)?;

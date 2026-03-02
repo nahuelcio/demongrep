@@ -19,6 +19,7 @@ use crate::chunker::SemanticChunker;
 use crate::embed::{EmbeddingService, ModelType};
 use crate::file::FileWalker;
 use crate::index::get_search_db_paths;
+use crate::index::is_local_db_path;
 use crate::vectordb::VectorStore;
 use crate::watch::{FileEvent, FileWatcher};
 
@@ -303,7 +304,7 @@ pub async fn serve(port: u16, path: Option<PathBuf>) -> Result<()> {
     let mut global_db_path: Option<PathBuf> = None;
 
     for db_path in db_paths {
-        if db_path.ends_with(".demongrep.db") {
+        if is_local_db_path(&db_path) {
             local_db_path = Some(db_path);
         } else {
             global_db_path = Some(db_path);

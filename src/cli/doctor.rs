@@ -116,9 +116,10 @@ fn check_path_conflicts(warnings: &mut Vec<String>) -> Result<()> {
 
 fn check_local_index(warnings: &mut Vec<String>) -> Result<()> {
     let cwd = env::current_dir().context("Failed to determine current directory")?;
-    let local_index = cwd.join(".demongrep.db");
+    let local_index = cwd.join(".demongrep").join("store");
+    let legacy_local_index = cwd.join(".demongrep.db");
 
-    if !local_index.exists() {
+    if !local_index.exists() && !legacy_local_index.exists() {
         warnings.push(format!(
             "No local index found at {} (run `demongrep index` in your project)",
             local_index.display()

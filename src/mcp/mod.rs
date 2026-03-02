@@ -15,11 +15,13 @@ use rmcp::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
 use crate::database::DatabaseManager; // NEW: Use DatabaseManager
 use crate::embed::EmbeddingService;
+use crate::index::is_local_db_path;
 use crate::rerank::NeuralReranker;
 
 const MCP_DEFAULT_LIMIT: usize = 4;
@@ -615,7 +617,32 @@ impl DemongrepService {
         let model_type = self.db_manager.model_type();
 
         for database in self.db_manager.databases() {
-            match crate::search::sync_database(&database.path, model_type) {
+            if !is_local_db_path(&database.path) {
+                continue;
+            }
+
+            let project_root = if database
+                .path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n == "store")
+                .unwrap_or(false)
+            {
+                database
+                    .path
+                    .parent()
+                    .and_then(Path::parent)
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("."))
+            } else {
+                database
+                    .path
+                    .parent()
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("."))
+            };
+
+            match crate::search::sync_database(&database.path, &project_root, model_type) {
                 Ok(()) => {
                     total_changes += 1; // At minimum we checked
                 }

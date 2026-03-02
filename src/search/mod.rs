@@ -173,7 +173,7 @@ pub async fn search(
         if !json {
             println!("{}", "🔄 Syncing local database...".yellow());
         }
-        sync_database(&db_path, model_type)?;
+        sync_database(&db_path, &project_root, model_type)?;
     }
 
     // Load local database
@@ -494,8 +494,8 @@ pub async fn search(
 }
 
 /// Sync database by re-indexing changed files
-pub fn sync_database(db_path: &PathBuf, model_type: ModelType) -> Result<()> {
-    let project_path = db_path.parent().unwrap_or(std::path::Path::new("."));
+pub fn sync_database(db_path: &PathBuf, project_root: &Path, model_type: ModelType) -> Result<()> {
+    let project_path = project_root;
 
     // Load file metadata store
     let mut file_meta =

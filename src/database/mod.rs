@@ -8,14 +8,14 @@ use std::path::PathBuf;
 
 use crate::embed::ModelType;
 use crate::fts::FtsStore;
-use crate::index::get_search_db_paths;
+use crate::index::{get_search_db_paths, is_local_db_path};
 use crate::rerank::rrf_fusion;
 use crate::vectordb::{SearchResult, VectorStore};
 
 /// Type of database (local or global)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DatabaseType {
-    /// Local database in project directory (.demongrep.db)
+    /// Local database in project directory (.demongrep/store or legacy .demongrep.db)
     Local,
     /// Global database in home directory
     Global,
@@ -106,7 +106,7 @@ impl DatabaseManager {
         // Load all databases
         let mut databases = Vec::new();
         for db_path in db_paths {
-            let db_type = if db_path.ends_with(".demongrep.db") {
+            let db_type = if is_local_db_path(&db_path) {
                 DatabaseType::Local
             } else {
                 DatabaseType::Global
@@ -457,7 +457,7 @@ impl DatabaseManagerBuilder {
         // Load all databases
         let mut databases = Vec::new();
         for db_path in self.db_paths {
-            let db_type = if db_path.ends_with(".demongrep.db") {
+            let db_type = if is_local_db_path(&db_path) {
                 DatabaseType::Local
             } else {
                 DatabaseType::Global

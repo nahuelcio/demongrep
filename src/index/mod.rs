@@ -15,6 +15,41 @@ use crate::file::FileWalker;
 use crate::fts::FtsStore;
 use crate::vectordb::VectorStore;
 
+const LOCAL_STATE_DIR: &str = ".demongrep";
+const LOCAL_STORE_DIR: &str = "store";
+const LEGACY_LOCAL_DB_DIR: &str = ".demongrep.db";
+
+fn local_db_path(project_root: &Path) -> PathBuf {
+    project_root.join(LOCAL_STATE_DIR).join(LOCAL_STORE_DIR)
+}
+
+fn legacy_local_db_path(project_root: &Path) -> PathBuf {
+    project_root.join(LEGACY_LOCAL_DB_DIR)
+}
+
+pub fn is_local_db_path(db_path: &Path) -> bool {
+    if db_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| n == LEGACY_LOCAL_DB_DIR)
+        .unwrap_or(false)
+    {
+        return true;
+    }
+
+    db_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| n == LOCAL_STORE_DIR)
+        .unwrap_or(false)
+        && db_path
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .map(|n| n == LOCAL_STATE_DIR)
+            .unwrap_or(false)
+}
+
 /// Get the database path for indexing
 fn get_index_db_path(path: Option<PathBuf>, global: bool) -> Result<PathBuf> {
     let project_path = path.unwrap_or_else(|| PathBuf::from("."));
@@ -40,8 +75,8 @@ fn get_index_db_path(path: Option<PathBuf>, global: bool) -> Result<PathBuf> {
 
         Ok(db_path)
     } else {
-        // Local mode: use project directory
-        Ok(canonical_path.join(".demongrep.db"))
+        // Local mode: use project-local state directory (Git-style layout)
+        Ok(local_db_path(&canonical_path))
     }
 }
 
@@ -52,10 +87,15 @@ pub fn get_search_db_paths(path: Option<PathBuf>) -> Result<Vec<PathBuf>> {
     let project_path = path.unwrap_or_else(|| PathBuf::from("."));
     let canonical_path = project_path.canonicalize()?;
 
-    // 1. Check local database
-    let local_db = canonical_path.join(".demongrep.db");
+    // 1. Check local database (prefer new .demongrep/store layout)
+    let local_db = local_db_path(&canonical_path);
     if local_db.exists() {
         paths.push(local_db);
+    } else {
+        let legacy_local_db = legacy_local_db_path(&canonical_path);
+        if legacy_local_db.exists() {
+            paths.push(legacy_local_db);
+        }
     }
 
     // 2. Check global database
@@ -76,16 +116,21 @@ pub fn get_search_db_paths(path: Option<PathBuf>) -> Result<Vec<PathBuf>> {
     Ok(paths)
 }
 
-/// Get only the local database path for search (project/.demongrep.db)
+/// Get only the local database path for search
 pub fn get_local_search_db_path(path: Option<PathBuf>) -> Result<Option<PathBuf>> {
     let project_path = path.unwrap_or_else(|| PathBuf::from("."));
     let canonical_path = project_path.canonicalize()?;
-    let local_db = canonical_path.join(".demongrep.db");
+    let local_db = local_db_path(&canonical_path);
 
     if local_db.exists() {
         Ok(Some(local_db))
     } else {
-        Ok(None)
+        let legacy_local_db = legacy_local_db_path(&canonical_path);
+        if legacy_local_db.exists() {
+            Ok(Some(legacy_local_db))
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -149,9 +194,14 @@ fn find_project_databases(project_name: &str) -> Result<Vec<PathBuf>> {
             // Also check for local database at project path
             let project_pb = PathBuf::from(&project_path);
             if project_pb.exists() {
-                let local_db = project_pb.join(".demongrep.db");
+                let local_db = local_db_path(&project_pb);
                 if local_db.exists() {
                     found_paths.push(local_db);
+                } else {
+                    let legacy_local_db = legacy_local_db_path(&project_pb);
+                    if legacy_local_db.exists() {
+                        found_paths.push(legacy_local_db);
+                    }
                 }
             }
         }
@@ -230,7 +280,15 @@ pub async fn index(
     let canonical_path = project_path.canonicalize()?;
 
     // Check for existing databases (local and global)
-    let local_db_path = canonical_path.join(".demongrep.db");
+    let local_db_path = local_db_path(&canonical_path);
+    let legacy_local_db_path = legacy_local_db_path(&canonical_path);
+    let existing_local_db = if local_db_path.exists() {
+        Some(local_db_path.clone())
+    } else if legacy_local_db_path.exists() {
+        Some(legacy_local_db_path.clone())
+    } else {
+        None
+    };
     let global_db_path = if let Some(home) = dirs::home_dir() {
         let mut hasher = DefaultHasher::new();
         canonical_path.hash(&mut hasher);
@@ -244,7 +302,7 @@ pub async fn index(
         None
     };
 
-    let local_exists = local_db_path.exists();
+    let local_exists = existing_local_db.is_some();
     let global_exists = global_db_path.as_ref().map(|p| p.exists()).unwrap_or(false);
 
     // Enforce exclusivity: can't have both local AND global
@@ -253,7 +311,9 @@ pub async fn index(
             "\n{}",
             "⚠️  Both local and global databases exist!".yellow()
         );
-        println!("   Local:  {}", local_db_path.display());
+        if let Some(ref lp) = existing_local_db {
+            println!("   Local:  {}", lp.display());
+        }
         if let Some(ref gp) = global_db_path {
             println!("   Global: {}", gp.display());
         }
@@ -269,7 +329,9 @@ pub async fn index(
     // If user requests global but local exists, error
     if global && local_exists {
         println!("\n{}", "⚠️  Local database already exists!".yellow());
-        println!("   Local: {}", local_db_path.display());
+        if let Some(ref lp) = existing_local_db {
+            println!("   Local: {}", lp.display());
+        }
         println!(
             "\n{}",
             "Cannot create global database when local exists.".yellow()
@@ -730,7 +792,7 @@ pub async fn list() -> Result<()> {
     } else {
         println!("\n{}", "Current Directory:".bright_green());
         for db_path in &db_paths {
-            let db_type = if db_path.ends_with(".demongrep.db") {
+            let db_type = if is_local_db_path(db_path) {
                 "Local"
             } else {
                 "Global"
@@ -874,7 +936,7 @@ pub async fn clear(path: Option<PathBuf>, yes: bool, project: Option<String>) ->
     println!("{}", "=".repeat(60));
 
     for db_path in &db_paths {
-        let db_type = if db_path.ends_with(".demongrep.db") {
+        let db_type = if is_local_db_path(db_path) {
             "Local"
         } else {
             "Global"
@@ -904,7 +966,7 @@ pub async fn clear(path: Option<PathBuf>, yes: bool, project: Option<String>) ->
     let mut deleted_global_dbs = Vec::new();
 
     for db_path in db_paths {
-        let db_type = if db_path.ends_with(".demongrep.db") {
+        let db_type = if is_local_db_path(&db_path) {
             "Local"
         } else {
             "Global"
@@ -912,7 +974,7 @@ pub async fn clear(path: Option<PathBuf>, yes: bool, project: Option<String>) ->
         println!("\n🔄 Removing {} database...", db_type);
 
         // Track global databases for projects.json cleanup
-        if !db_path.ends_with(".demongrep.db") {
+        if !is_local_db_path(&db_path) {
             deleted_global_dbs.push(db_path.clone());
         }
 
@@ -960,5 +1022,97 @@ fn print_repo_stats(_repo_path: &Path, db_path: &Path) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+/// Migrate legacy local index layout (.demongrep.db) to new layout (.demongrep/store)
+pub async fn migrate_index(path: Option<PathBuf>, yes: bool) -> Result<()> {
+    let project_path = path.unwrap_or_else(|| PathBuf::from("."));
+    let canonical_path = project_path.canonicalize()?;
+
+    let new_local = local_db_path(&canonical_path);
+    let legacy_local = legacy_local_db_path(&canonical_path);
+
+    println!("{}", "🔁 Migrate Local Index".bright_cyan().bold());
+    println!("{}", "=".repeat(60));
+    println!("📂 Project: {}", canonical_path.display());
+    println!("📍 Legacy:  {}", legacy_local.display());
+    println!("📍 New:     {}", new_local.display());
+
+    if !legacy_local.exists() && !new_local.exists() {
+        println!("\n{}", "No local index found to migrate.".yellow());
+        println!("   Run {} first", "demongrep index".bright_cyan());
+        return Ok(());
+    }
+
+    if !legacy_local.exists() && new_local.exists() {
+        println!("\n{}", "Already using new index layout.".green());
+        return Ok(());
+    }
+
+    if legacy_local.exists() && new_local.exists() {
+        println!(
+            "\n{}",
+            "Both legacy and new local indexes exist; refusing to overwrite.".yellow()
+        );
+        println!(
+            "   Remove one of them manually, then run {} again",
+            "demongrep migrate-index".bright_cyan()
+        );
+        return Err(anyhow::anyhow!(
+            "Both legacy and new local indexes exist"
+        ));
+    }
+
+    if !yes {
+        println!(
+            "\n{}",
+            "This will move .demongrep.db to .demongrep/store".yellow()
+        );
+        print!("Continue? (y/N): ");
+        use std::io::{self, Write};
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        if !input.trim().eq_ignore_ascii_case("y") {
+            println!("{}", "Cancelled.".dimmed());
+            return Ok(());
+        }
+    }
+
+    if let Some(parent) = new_local.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    // Fast path: rename when possible.
+    match std::fs::rename(&legacy_local, &new_local) {
+        Ok(_) => {}
+        Err(_) => {
+            // Fallback path: recursive copy + delete legacy.
+            copy_dir_recursive(&legacy_local, &new_local)?;
+            std::fs::remove_dir_all(&legacy_local)?;
+        }
+    }
+
+    println!("\n{}", "✅ Migration complete".green());
+    println!("   New local index: {}", new_local.display());
+
+    Ok(())
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_recursive(&from, &to)?;
+        } else {
+            std::fs::copy(&from, &to)?;
+        }
+    }
     Ok(())
 }

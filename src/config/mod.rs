@@ -23,7 +23,7 @@ pub struct ProjectConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EmbeddingConfig {
-    /// Model name (e.g., "bge-small", "minilm-l6-q", "jina-code")
+    /// Model name (e.g., "jina-v5-nano", "jina-code", "bge-small-q")
     pub model: String,
     /// Batch size for embedding
     pub batch_size: usize,
@@ -34,7 +34,7 @@ pub struct EmbeddingConfig {
 impl Default for EmbeddingConfig {
     fn default() -> Self {
         Self {
-            model: "mxbai-embed-xsmall-v1".to_string(),
+            model: "jina-v5-nano".to_string(),
             batch_size: 32,
             cache_size_mb: 512,
         }
@@ -162,7 +162,7 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = ProjectConfig::default();
-        assert_eq!(config.embedding.model, "mxbai-embed-xsmall-v1");
+        assert_eq!(config.embedding.model, "jina-v5-nano");
         assert_eq!(config.search.rrf_k, 20.0);
         assert_eq!(config.server.port, 4444);
         assert_eq!(config.chunking.max_lines, 75);
@@ -180,7 +180,7 @@ default_limit = 15
         assert_eq!(config.search.rrf_k, 30.0);
         assert_eq!(config.search.default_limit, 15);
         // Other fields should be defaults
-        assert_eq!(config.embedding.model, "mxbai-embed-xsmall-v1");
+        assert_eq!(config.embedding.model, "jina-v5-nano");
         assert_eq!(config.server.port, 4444);
     }
 
@@ -222,6 +222,6 @@ debounce_ms = 500
     #[test]
     fn test_load_nonexistent_returns_defaults() {
         let config = ProjectConfig::load(Some(std::path::Path::new("/nonexistent/path")));
-        assert_eq!(config.embedding.model, "mxbai-embed-xsmall-v1");
+        assert_eq!(config.embedding.model, "jina-v5-nano");
     }
 }

@@ -24,8 +24,8 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub store: Option<String>,
 
-    /// Embedding model to use (e.g., bge-small-q, minilm-l6-q, jina-code, mxbai-large, mxbai-xsmall)
-    /// Available: minilm-l6-q, bge-small-q, jina-code, mxbai-large, mxbai-xsmall
+    /// Embedding model to use (e.g., jina-v5-nano, jina-code, bge-small-q, minilm-l6-q, mxbai-large, mxbai-xsmall)
+    /// Available: jina-v5-nano, jina-code, minilm-l6-q, bge-small-q, mxbai-large, mxbai-xsmall
     #[arg(long, global = true)]
     pub model: Option<String>,
 }
@@ -123,7 +123,7 @@ pub enum Commands {
         #[arg(short, long, hide = true)]
         force: bool,
 
-        /// Index to global database in home directory instead of local .demongrep.db
+        /// Index to global database in home directory instead of local .demongrep/store
         #[arg(short = 'g', long)]
         global: bool,
     },
@@ -159,6 +159,16 @@ pub enum Commands {
         /// Project name or path to clear (looks up in global projects.json)
         #[arg(short = 'p', long)]
         project: Option<String>,
+    },
+
+    /// Migrate legacy local index from .demongrep.db to .demongrep/store
+    MigrateIndex {
+        /// Project path (defaults to current directory)
+        path: Option<PathBuf>,
+
+        /// Skip confirmation prompt
+        #[arg(short = 'y', long)]
+        yes: bool,
     },
 
     /// Check installation health
@@ -265,7 +275,7 @@ pub async fn run() -> Result<()> {
     if cli.model.is_some() && model_type.is_none() {
         return Err(anyhow::anyhow!(
             "Unknown model: '{}'. Available models:\n  \
-             minilm-l6-q, bge-small-q, jina-code, mxbai-large, mxbai-xsmall",
+             jina-v5-nano, jina-code, minilm-l6-q, bge-small-q, mxbai-large, mxbai-xsmall",
             cli.model.as_ref().unwrap()
         ));
     }
@@ -342,6 +352,7 @@ pub async fn run() -> Result<()> {
         Commands::List => crate::index::list().await,
         Commands::Stats { path } => crate::index::stats(path).await,
         Commands::Clear { path, yes, project } => crate::index::clear(path, yes, project).await,
+        Commands::MigrateIndex { path, yes } => crate::index::migrate_index(path, yes).await,
         Commands::Doctor => crate::cli::doctor::run().await,
         Commands::Setup { model } => crate::cli::setup::run(model).await,
         Commands::Mcp { path } => crate::mcp::run_mcp_server(path).await,
@@ -383,6 +394,7 @@ fn is_known_subcommand(arg: &str) -> bool {
             | "list"
             | "stats"
             | "clear"
+            | "migrate-index"
             | "doctor"
             | "setup"
             | "mcp"
