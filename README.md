@@ -947,6 +947,17 @@ demongrep also respects `.gitignore` and `.osgrepignore` files.
 demongrep index
 ```
 
+### Setup fails downloading `jina-v5-nano` ONNX
+
+If Hugging Face does not provide an ONNX export under expected paths for the selected model,
+demongrep automatically falls back to `jina-code` in `v1.9.1+`.
+
+You can also choose an explicit stable model:
+
+```bash
+demongrep setup --model jina-code
+```
+
 ### Search returns poor results
 
 1. **Check if index is stale:**

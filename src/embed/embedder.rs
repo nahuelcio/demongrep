@@ -174,6 +174,7 @@ impl FastEmbedder {
         info_print!("📦 Loading embedding model: {}", model_type.name());
         info_print!("   Dimensions: {}", model_type.dimensions());
 
+        let mut active_model_type = model_type;
         let model = match model_type.to_fastembed_model() {
             Some(fast_model) => TextEmbedding::try_new(
                 InitOptions::new(fast_model).with_show_download_progress(true),
@@ -181,7 +182,29 @@ impl FastEmbedder {
             .map_err(|e| anyhow!("Failed to initialize embedding model: {}", e))?,
             None => match model_type {
                 ModelType::MxbaiEmbedXSmallV1 => Self::load_mxbai_xsmall_user_defined()?,
-                ModelType::JinaEmbeddingsV5TextNano => Self::load_jina_v5_text_nano_user_defined()?,
+                ModelType::JinaEmbeddingsV5TextNano => {
+                    match Self::load_jina_v5_text_nano_user_defined() {
+                        Ok(model) => model,
+                        Err(primary_err) => {
+                            info_print!(
+                                "⚠️  Could not load Jina v5 nano ONNX export ({}). Falling back to jina-code.",
+                                primary_err
+                            );
+                            active_model_type = ModelType::JinaEmbeddingsV2BaseCode;
+                            TextEmbedding::try_new(
+                                InitOptions::new(FastEmbedModel::JinaEmbeddingsV2BaseCode)
+                                    .with_show_download_progress(true),
+                            )
+                            .map_err(|fallback_err| {
+                                anyhow!(
+                                    "Failed to initialize fallback model '{}': {}",
+                                    ModelType::JinaEmbeddingsV2BaseCode.name(),
+                                    fallback_err
+                                )
+                            })?
+                        }
+                    }
+                }
                 _ => {
                     return Err(anyhow!(
                         "Model {} requires a user-defined loader that is not implemented",
@@ -193,7 +216,10 @@ impl FastEmbedder {
 
         info_print!("✅ Model loaded successfully!");
 
-        Ok(Self { model, model_type })
+        Ok(Self {
+            model,
+            model_type: active_model_type,
+        })
     }
 
     fn load_mxbai_xsmall_user_defined() -> Result<TextEmbedding> {
@@ -277,11 +303,16 @@ impl FastEmbedder {
 
     fn load_jina_v5_text_nano_user_defined() -> Result<TextEmbedding> {
         const MODEL_REPO: &str = "jinaai/jina-embeddings-v5-text-nano";
-        const ONNX_FILE: &str = "onnx/model.onnx";
         const TOKENIZER_JSON: &str = "tokenizer.json";
         const CONFIG_JSON: &str = "config.json";
         const SPECIAL_TOKENS_MAP_JSON: &str = "special_tokens_map.json";
         const TOKENIZER_CONFIG_JSON: &str = "tokenizer_config.json";
+        const ONNX_CANDIDATES: &[&str] = &[
+            "onnx/model.onnx",
+            "model.onnx",
+            "onnx/model_fp16.onnx",
+            "onnx/model_int8.onnx",
+        ];
 
         let endpoint =
             std::env::var("HF_ENDPOINT").unwrap_or_else(|_| "https://huggingface.co".to_string());
@@ -337,7 +368,26 @@ impl FastEmbedder {
             special_tokens_map_file: read_repo_file(SPECIAL_TOKENS_MAP_JSON)?,
             tokenizer_config_file: read_repo_file(TOKENIZER_CONFIG_JSON)?,
         };
-        let onnx_file = read_repo_file(ONNX_FILE)?;
+
+        let mut onnx_file: Option<Vec<u8>> = None;
+        let mut onnx_errors = Vec::new();
+        for candidate in ONNX_CANDIDATES {
+            match read_repo_file(candidate) {
+                Ok(bytes) => {
+                    onnx_file = Some(bytes);
+                    break;
+                }
+                Err(e) => onnx_errors.push(format!("{} -> {}", candidate, e)),
+            }
+        }
+
+        let onnx_file = onnx_file.ok_or_else(|| {
+            anyhow!(
+                "No ONNX file found for {}. Tried: {}",
+                MODEL_REPO,
+                onnx_errors.join(" | ")
+            )
+        })?;
 
         let model = UserDefinedEmbeddingModel::new(onnx_file, tokenizer_files)
             .with_pooling(Pooling::Mean)

@@ -16,6 +16,7 @@ pub async fn run(model: Option<String>) -> Result<()> {
     println!("  Model: {}", model_type.name());
     println!("  Dimensions: {}", model_type.dimensions());
     println!("  This will download model files if they are not present.");
+    println!("  If selected model artifacts are unavailable, demongrep will fallback to a compatible local model.");
 
     // Loading the embedding service forces model initialization and local caching.
     let service = EmbeddingService::with_model(model_type).map_err(|e| {
