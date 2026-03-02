@@ -174,7 +174,6 @@ impl FastEmbedder {
         info_print!("📦 Loading embedding model: {}", model_type.name());
         info_print!("   Dimensions: {}", model_type.dimensions());
 
-        let mut active_model_type = model_type;
         let model = match model_type.to_fastembed_model() {
             Some(fast_model) => TextEmbedding::try_new(
                 InitOptions::new(fast_model).with_show_download_progress(true),
@@ -182,29 +181,8 @@ impl FastEmbedder {
             .map_err(|e| anyhow!("Failed to initialize embedding model: {}", e))?,
             None => match model_type {
                 ModelType::MxbaiEmbedXSmallV1 => Self::load_mxbai_xsmall_user_defined()?,
-                ModelType::JinaEmbeddingsV5TextNano => {
-                    match Self::load_jina_v5_text_nano_user_defined() {
-                        Ok(model) => model,
-                        Err(primary_err) => {
-                            info_print!(
-                                "⚠️  Could not load Jina v5 nano ONNX export ({}). Falling back to jina-code.",
-                                primary_err
-                            );
-                            active_model_type = ModelType::JinaEmbeddingsV2BaseCode;
-                            TextEmbedding::try_new(
-                                InitOptions::new(FastEmbedModel::JinaEmbeddingsV2BaseCode)
-                                    .with_show_download_progress(true),
-                            )
-                            .map_err(|fallback_err| {
-                                anyhow!(
-                                    "Failed to initialize fallback model '{}': {}",
-                                    ModelType::JinaEmbeddingsV2BaseCode.name(),
-                                    fallback_err
-                                )
-                            })?
-                        }
-                    }
-                }
+                ModelType::JinaEmbeddingsV5TextNano => Self::load_jina_v5_text_nano_user_defined()
+                    .map_err(|e| anyhow!("Failed to initialize '{}': {}", model_type.name(), e))?,
                 _ => {
                     return Err(anyhow!(
                         "Model {} requires a user-defined loader that is not implemented",
@@ -218,7 +196,7 @@ impl FastEmbedder {
 
         Ok(Self {
             model,
-            model_type: active_model_type,
+            model_type,
         })
     }
 

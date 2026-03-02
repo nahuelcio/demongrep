@@ -950,9 +950,9 @@ demongrep index
 ### Setup fails downloading `jina-v5-nano` ONNX
 
 If Hugging Face does not provide an ONNX export under expected paths for the selected model,
-demongrep automatically falls back to `jina-code` in `v1.9.1+`.
+demongrep now fails setup for `jina-v5-nano` instead of silently switching models.
 
-You can also choose an explicit stable model:
+You can choose another explicit model when needed:
 
 ```bash
 demongrep setup --model jina-code
