@@ -77,6 +77,21 @@ Download pre-built binaries directly from [GitHub Releases](https://github.com/n
 
 Windows pre-built release binaries are not published in this version.
 
+### Homebrew (macOS/Linux)
+
+You can install demongrep through a Homebrew tap hosted in this repository.
+
+```bash
+brew tap nahuelcio/demongrep https://github.com/nahuelcio/demongrep
+brew install nahuelcio/demongrep/demongrep
+```
+
+After tapping, this also works:
+
+```bash
+brew install demongrep
+```
+
 **Steps:**
 1. Go to https://github.com/nahuelcio/demongrep/releases
 2. Download the binary for your platform
