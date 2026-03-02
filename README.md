@@ -856,7 +856,7 @@ These languages are indexed with fallback line-based chunking:
 | Name | ID | Dimensions | Speed | Quality | Best For |
 |------|-----|------------|-------|---------|----------|
 | MiniLM-L6 (Q) | `minilm-l6-q` | 384 | Fastest | Good | **Default**, stable built-in baseline |
-| Jina V5 Nano | `jina-v5-nano` | 768 | Fast | High | Small Jina option when a public ONNX export exists |
+| Jina V5 Nano | `jina-v5-nano` | 768 | Fast | High | Small Jina option using the retrieval-specific ONNX export |
 | Jina Code 1.5B | `jina-code-1.5b` | 1536 | Slow | High | Larger code-focused public ONNX fallback |
 | Mixedbread XSmall | `mixedbread-ai/mxbai-embed-xsmall-v1` | 384 | Fast | Good | Lightweight mixedbread option |
 
@@ -947,7 +947,9 @@ demongrep index
 
 ### Setup fails downloading a model ONNX
 
-If Hugging Face does not provide a public ONNX export for the selected model (e.g. `jina-v5-nano`), setup will fail with HTTP 404 errors.
+If Hugging Face does not provide a public ONNX export for the selected model, setup will fail with HTTP 404 errors.
+
+`jina-v5-nano` uses the task-specific `jinaai/jina-embeddings-v5-text-nano-retrieval` ONNX export rather than the base model repo, which does not publish ONNX artifacts.
 
 The default model is `minilm-l6-q`, which uses a built-in fastembed ONNX export and is the safest fallback. If you want a larger code-focused public ONNX model, use `jina-code-1.5b`:
 

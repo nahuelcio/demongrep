@@ -59,6 +59,7 @@ impl ModelType {
     /// Format user query according to model-specific recommendations.
     pub fn format_query(&self, query: &str) -> String {
         match self {
+            Self::JinaEmbeddingsV5TextNano => format!("Query: {}", query),
             // Mixedbread recommends this retrieval query prefix.
             Self::MxbaiEmbedXSmallV1 => {
                 format!(
@@ -80,6 +81,7 @@ impl ModelType {
     /// Format indexed passages according to model-specific recommendations.
     pub fn format_passage(&self, passage: &str) -> String {
         match self {
+            Self::JinaEmbeddingsV5TextNano => format!("Document: {}", passage),
             Self::JinaCodeEmbeddings15B => {
                 format!("Candidate code snippet:\n{}", passage)
             }
@@ -89,7 +91,10 @@ impl ModelType {
 
     /// Whether this model applies special passage formatting.
     pub fn has_special_passage_format(&self) -> bool {
-        matches!(self, Self::JinaCodeEmbeddings15B)
+        matches!(
+            self,
+            Self::JinaEmbeddingsV5TextNano | Self::JinaCodeEmbeddings15B
+        )
     }
 
     /// Get a short identifier for the model (for filenames, etc.)
@@ -246,6 +251,31 @@ impl FastEmbedder {
         Ok(bytes)
     }
 
+    fn synthesize_special_tokens_map(tokenizer_config_file: &[u8]) -> Result<Vec<u8>> {
+        let tokenizer_config: serde_json::Value = serde_json::from_slice(tokenizer_config_file)
+            .context("Failed to parse tokenizer_config.json for synthetic special tokens map")?;
+
+        let mut special_tokens = serde_json::Map::new();
+        for key in [
+            "bos_token",
+            "eos_token",
+            "unk_token",
+            "sep_token",
+            "cls_token",
+            "pad_token",
+            "mask_token",
+        ] {
+            if let Some(value) = tokenizer_config.get(key) {
+                if value.is_string() || value.is_object() {
+                    special_tokens.insert(key.to_string(), value.clone());
+                }
+            }
+        }
+
+        serde_json::to_vec(&serde_json::Value::Object(special_tokens))
+            .context("Failed to serialize synthetic special_tokens_map.json")
+    }
+
     fn load_mxbai_xsmall_user_defined() -> Result<TextEmbedding> {
         const MODEL_REPO: &str = "mixedbread-ai/mxbai-embed-xsmall-v1";
         const ONNX_FILE: &str = "onnx/model.onnx";
@@ -296,20 +326,40 @@ impl FastEmbedder {
     }
 
     fn load_jina_v5_text_nano_user_defined() -> Result<TextEmbedding> {
-        const MODEL_REPO: &str = "jinaai/jina-embeddings-v5-text-nano";
+        const MODEL_REPO: &str = "jinaai/jina-embeddings-v5-text-nano-retrieval";
         const TOKENIZER_JSON: &str = "tokenizer.json";
         const CONFIG_JSON: &str = "config.json";
         const SPECIAL_TOKENS_MAP_JSON: &str = "special_tokens_map.json";
         const TOKENIZER_CONFIG_JSON: &str = "tokenizer_config.json";
-        const ONNX_CANDIDATES: &[&str] = &[
-            "onnx/model.onnx",
-            "model.onnx",
-            "onnx/model_fp16.onnx",
-            "onnx/model_int8.onnx",
+        const ONNX_CANDIDATES: &[(&str, &str, &str)] = &[
+            ("onnx/model.onnx", "onnx/model.onnx_data", "model.onnx_data"),
+            (
+                "onnx/model_fp16.onnx",
+                "onnx/model_fp16.onnx_data",
+                "model_fp16.onnx_data",
+            ),
+            (
+                "onnx/model_quantized.onnx",
+                "onnx/model_quantized.onnx_data",
+                "model_quantized.onnx_data",
+            ),
         ];
 
         let endpoint = Self::huggingface_endpoint();
-        let model_cache = Self::user_defined_cache_dir(&["jinaai", "jina-embeddings-v5-text-nano"]);
+        let model_cache =
+            Self::user_defined_cache_dir(&["jinaai", "jina-embeddings-v5-text-nano-retrieval"]);
+
+        let tokenizer_config_file =
+            Self::read_hf_repo_file(&model_cache, MODEL_REPO, &endpoint, TOKENIZER_CONFIG_JSON)?;
+        let special_tokens_map_file = match Self::read_hf_repo_file(
+            &model_cache,
+            MODEL_REPO,
+            &endpoint,
+            SPECIAL_TOKENS_MAP_JSON,
+        ) {
+            Ok(bytes) => bytes,
+            Err(_) => Self::synthesize_special_tokens_map(&tokenizer_config_file)?,
+        };
 
         let tokenizer_files = TokenizerFiles {
             tokenizer_file: Self::read_hf_repo_file(
@@ -319,41 +369,37 @@ impl FastEmbedder {
                 TOKENIZER_JSON,
             )?,
             config_file: Self::read_hf_repo_file(&model_cache, MODEL_REPO, &endpoint, CONFIG_JSON)?,
-            special_tokens_map_file: Self::read_hf_repo_file(
-                &model_cache,
-                MODEL_REPO,
-                &endpoint,
-                SPECIAL_TOKENS_MAP_JSON,
-            )?,
-            tokenizer_config_file: Self::read_hf_repo_file(
-                &model_cache,
-                MODEL_REPO,
-                &endpoint,
-                TOKENIZER_CONFIG_JSON,
-            )?,
+            special_tokens_map_file,
+            tokenizer_config_file,
         };
 
-        let mut onnx_file: Option<Vec<u8>> = None;
+        let mut onnx_file: Option<(Vec<u8>, String, Vec<u8>)> = None;
         let mut onnx_errors = Vec::new();
-        for candidate in ONNX_CANDIDATES {
-            match Self::read_hf_repo_file(&model_cache, MODEL_REPO, &endpoint, candidate) {
-                Ok(bytes) => {
-                    onnx_file = Some(bytes);
+        for (onnx_candidate, data_candidate, initializer_name) in ONNX_CANDIDATES {
+            match (
+                Self::read_hf_repo_file(&model_cache, MODEL_REPO, &endpoint, onnx_candidate),
+                Self::read_hf_repo_file(&model_cache, MODEL_REPO, &endpoint, data_candidate),
+            ) {
+                (Ok(onnx_bytes), Ok(data_bytes)) => {
+                    onnx_file = Some((onnx_bytes, (*initializer_name).to_string(), data_bytes));
                     break;
                 }
-                Err(e) => onnx_errors.push(format!("{} -> {}", candidate, e)),
+                (Err(e), _) => onnx_errors.push(format!("{} -> {}", onnx_candidate, e)),
+                (_, Err(e)) => onnx_errors.push(format!("{} -> {}", data_candidate, e)),
             }
         }
 
-        let onnx_file = onnx_file.ok_or_else(|| {
+        let (onnx_file, initializer_name, onnx_data_file) = onnx_file.ok_or_else(|| {
             anyhow!(
-                "No public ONNX export found for {}. Tried: {}. Use 'jina-code-1.5b' instead.",
+                "No usable ONNX export found for {} via {}. Tried: {}. Use 'jina-code-1.5b' instead.",
+                ModelType::JinaEmbeddingsV5TextNano.name(),
                 MODEL_REPO,
                 onnx_errors.join(" | ")
             )
         })?;
 
         let model = UserDefinedEmbeddingModel::new(onnx_file, tokenizer_files)
+            .with_external_initializer(initializer_name, onnx_data_file)
             .with_pooling(Pooling::Mean)
             .with_quantization(QuantizationMode::None);
 
@@ -605,6 +651,14 @@ mod tests {
             ModelType::MxbaiEmbedXSmallV1.format_passage(passage),
             passage
         );
+
+        let jina_v5_query = ModelType::JinaEmbeddingsV5TextNano.format_query(query);
+        assert_eq!(jina_v5_query, "Query: find auth");
+        assert_eq!(
+            ModelType::JinaEmbeddingsV5TextNano.format_passage(passage),
+            format!("Document: {}", passage)
+        );
+        assert!(ModelType::JinaEmbeddingsV5TextNano.has_special_passage_format());
 
         let jina_15b_query = ModelType::JinaCodeEmbeddings15B.format_query(query);
         assert!(jina_15b_query

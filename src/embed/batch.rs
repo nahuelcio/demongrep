@@ -347,7 +347,7 @@ mod tests {
         let v5_text =
             BatchEmbedder::prepare_text_for_model(&chunk, ModelType::JinaEmbeddingsV5TextNano);
         let minilm_text = BatchEmbedder::prepare_text_for_model(&chunk, ModelType::AllMiniLML6V2Q);
-        assert_eq!(v5_text, minilm_text);
+        assert_eq!(v5_text, format!("Document: {}", minilm_text));
     }
 
     #[test]
