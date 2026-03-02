@@ -19,4 +19,11 @@ class Demongrep < Formula
   test do
     assert_match version.to_s, shell_output("#{bin}/demongrep --version")
   end
+
+  def caveats
+    <<~EOS
+      ONNX Runtime may require setting LD_LIBRARY_PATH. If you encounter runtime errors, run:
+        export LD_LIBRARY_PATH="#{Formula["onnxruntime"].opt_lib}:$LD_LIBRARY_PATH"
+    EOS
+  end
 end
