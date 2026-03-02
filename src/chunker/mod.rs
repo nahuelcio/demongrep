@@ -8,8 +8,6 @@ mod grammar;
 mod parser;
 mod semantic;
 
-pub use grammar::GrammarManager;
-pub use parser::CodeParser;
 pub use semantic::SemanticChunker;
 
 /// Default number of context lines before/after a chunk
