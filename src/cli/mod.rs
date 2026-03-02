@@ -24,8 +24,8 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub store: Option<String>,
 
-    /// Embedding model to use (e.g., jina-v5-nano, jina-code, bge-small-q, minilm-l6-q, mxbai-large, mxbai-xsmall)
-    /// Available: jina-v5-nano, jina-code, minilm-l6-q, bge-small-q, mxbai-large, mxbai-xsmall
+    /// Embedding model to use (e.g., minilm-l6-q, jina-v5-nano, jina-code-1.5b, mixedbread-ai/mxbai-embed-xsmall-v1)
+    /// Available: minilm-l6-q, jina-v5-nano, jina-code-1.5b, mixedbread-ai/mxbai-embed-xsmall-v1
     #[arg(long, global = true)]
     pub model: Option<String>,
 }
@@ -275,7 +275,7 @@ pub async fn run() -> Result<()> {
     if cli.model.is_some() && model_type.is_none() {
         return Err(anyhow::anyhow!(
             "Unknown model: '{}'. Available models:\n  \
-             jina-v5-nano, jina-code, minilm-l6-q, bge-small-q, mxbai-large, mxbai-xsmall",
+             minilm-l6-q, jina-v5-nano, jina-code-1.5b, mixedbread-ai/mxbai-embed-xsmall-v1",
             cli.model.as_ref().unwrap()
         ));
     }

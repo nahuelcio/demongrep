@@ -1059,9 +1059,7 @@ pub async fn migrate_index(path: Option<PathBuf>, yes: bool) -> Result<()> {
             "   Remove one of them manually, then run {} again",
             "demongrep migrate-index".bright_cyan()
         );
-        return Err(anyhow::anyhow!(
-            "Both legacy and new local indexes exist"
-        ));
+        return Err(anyhow::anyhow!("Both legacy and new local indexes exist"));
     }
 
     if !yes {

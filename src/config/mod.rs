@@ -23,7 +23,7 @@ pub struct ProjectConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EmbeddingConfig {
-    /// Model name (e.g., "jina-v5-nano", "jina-code", "bge-small-q")
+    /// Model name (e.g., "minilm-l6-q", "jina-v5-nano", "jina-code-1.5b")
     pub model: String,
     /// Batch size for embedding
     pub batch_size: usize,
@@ -34,7 +34,7 @@ pub struct EmbeddingConfig {
 impl Default for EmbeddingConfig {
     fn default() -> Self {
         Self {
-            model: "jina-v5-nano".to_string(),
+            model: "minilm-l6-q".to_string(),
             batch_size: 32,
             cache_size_mb: 512,
         }
@@ -162,7 +162,7 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = ProjectConfig::default();
-        assert_eq!(config.embedding.model, "jina-v5-nano");
+        assert_eq!(config.embedding.model, "minilm-l6-q");
         assert_eq!(config.search.rrf_k, 20.0);
         assert_eq!(config.server.port, 4444);
         assert_eq!(config.chunking.max_lines, 75);
@@ -180,7 +180,7 @@ default_limit = 15
         assert_eq!(config.search.rrf_k, 30.0);
         assert_eq!(config.search.default_limit, 15);
         // Other fields should be defaults
-        assert_eq!(config.embedding.model, "jina-v5-nano");
+        assert_eq!(config.embedding.model, "minilm-l6-q");
         assert_eq!(config.server.port, 4444);
     }
 
@@ -188,7 +188,7 @@ default_limit = 15
     fn test_parse_full_toml() {
         let toml_str = r#"
 [embedding]
-model = "bge-small"
+model = "jina-code-1.5b"
 batch_size = 64
 cache_size_mb = 1024
 
@@ -211,7 +211,7 @@ port = 8080
 debounce_ms = 500
 "#;
         let config: ProjectConfig = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.embedding.model, "bge-small");
+        assert_eq!(config.embedding.model, "jina-code-1.5b");
         assert_eq!(config.embedding.batch_size, 64);
         assert_eq!(config.chunking.max_lines, 100);
         assert_eq!(config.search.rrf_k, 25.0);
@@ -222,6 +222,6 @@ debounce_ms = 500
     #[test]
     fn test_load_nonexistent_returns_defaults() {
         let config = ProjectConfig::load(Some(std::path::Path::new("/nonexistent/path")));
-        assert_eq!(config.embedding.model, "jina-v5-nano");
+        assert_eq!(config.embedding.model, "minilm-l6-q");
     }
 }

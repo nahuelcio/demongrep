@@ -1,11 +1,11 @@
 #!/bin/bash
-# Benchmark demongrep on external repo (bat) with top 5 models
+# Benchmark demongrep on external repo (bat) with supported models
 
 REPO_PATH="/tmp/bat"
 DEMONGREP="./target/release/demongrep"
 
-# Top 5 models from our benchmark
-MODELS=("minilm-l6-q" "jina-code" "e5-multilingual" "bge-small" "bge-small-q")
+# Supported embedding models
+MODELS=("minilm-l6-q" "jina-v5-nano" "jina-code-1.5b" "mixedbread-ai/mxbai-embed-xsmall-v1")
 
 # Test queries for bat codebase (cat clone with syntax highlighting)
 # Format: "query|expected_file_pattern"

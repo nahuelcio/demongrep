@@ -174,7 +174,7 @@ impl BatchEmbedder {
     /// - Docstring (if available)
     /// - Content
     pub fn prepare_text(chunk: &Chunk) -> String {
-        Self::prepare_text_for_model(chunk, ModelType::default())
+        Self::prepare_text_base(chunk)
     }
 
     /// Prepare chunk text with model-specific passage formatting.
@@ -344,9 +344,10 @@ mod tests {
             "test.rs".to_string(),
         );
 
-        let bge_text = BatchEmbedder::prepare_text_for_model(&chunk, ModelType::BGESmallENV15Q);
+        let v5_text =
+            BatchEmbedder::prepare_text_for_model(&chunk, ModelType::JinaEmbeddingsV5TextNano);
         let minilm_text = BatchEmbedder::prepare_text_for_model(&chunk, ModelType::AllMiniLML6V2Q);
-        assert_eq!(bge_text, minilm_text);
+        assert_eq!(v5_text, minilm_text);
     }
 
     #[test]

@@ -327,7 +327,7 @@ demongrep index --dry-run
 demongrep index --force
 
 # Index with a specific model
-demongrep index --model jina-code
+demongrep index --model jina-code-1.5b
 ```
 
 #### What Gets Indexed
@@ -586,7 +586,7 @@ demongrep bench --profile smoke --limit 60
 demongrep bench --profile full --output benchmarks/benchmark_results.md
 
 # Explicit model list (takes precedence over profile)
-demongrep bench --models minilm-l6-q,jina-code --profile full
+demongrep bench --models minilm-l6-q,jina-code-1.5b --profile full
 ```
 
 Legacy helper scripts (`benchmark_all_models.sh`, `benchmark_models_simple.sh`) now wrap `demongrep bench`.
@@ -855,23 +855,21 @@ These languages are indexed with fallback line-based chunking:
 
 | Name | ID | Dimensions | Speed | Quality | Best For |
 |------|-----|------------|-------|---------|----------|
-| MiniLM-L6 (Q) | `minilm-l6-q` | 384 | Fastest | Excellent | Fast baseline |
-| BGE Small (Q) | `bge-small-q` | 384 | Fast | Good | General use |
-| Jina Code | `jina-code` | 768 | Medium | Excellent | **Default**, code-specialized semantic search |
-| Jina V5 Nano | `jina-v5-nano` | 768 | Fast | Excellent | Alternative (requires ONNX export availability) |
-| Mixedbread XSmall | `mxbai-xsmall` | 384 | Fast | Good | Lightweight mixedbread option |
-| Mixedbread Large | `mxbai-large` | 1024 | Slow | High | Highest quality retrieval |
+| MiniLM-L6 (Q) | `minilm-l6-q` | 384 | Fastest | Good | **Default**, stable built-in baseline |
+| Jina V5 Nano | `jina-v5-nano` | 768 | Fast | High | Small Jina option when a public ONNX export exists |
+| Jina Code 1.5B | `jina-code-1.5b` | 1536 | Slow | High | Larger code-focused public ONNX fallback |
+| Mixedbread XSmall | `mixedbread-ai/mxbai-embed-xsmall-v1` | 384 | Fast | Good | Lightweight mixedbread option |
 
-Legacy model IDs are accepted as aliases and mapped to the active model set above.
+Short aliases are also accepted for some models (for example `mxbai-xsmall`).
 
 ### Changing Models
 
 ```bash
 # Index with specific model
-demongrep index --model jina-code
+demongrep index --model jina-code-1.5b
 
 # Search must use same model as index
-demongrep search "query" --model jina-code
+demongrep search "query" --model jina-code-1.5b
 ```
 
 **Note:** The model used for indexing is saved in metadata. If you search with a different model, you may get poor results. Use `--force` to re-index with a new model.
@@ -951,10 +949,10 @@ demongrep index
 
 If Hugging Face does not provide a public ONNX export for the selected model (e.g. `jina-v5-nano`), setup will fail with HTTP 404 errors.
 
-The default model is `jina-code`, which uses a built-in fastembed ONNX export and always works. Use it explicitly if needed:
+The default model is `minilm-l6-q`, which uses a built-in fastembed ONNX export and is the safest fallback. If you want a larger code-focused public ONNX model, use `jina-code-1.5b`:
 
 ```bash
-demongrep setup --model jina-code
+demongrep setup --model jina-code-1.5b
 ```
 
 ### Search returns poor results

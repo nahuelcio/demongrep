@@ -110,11 +110,11 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 
 fn models_for_profile(profile: BenchProfile) -> Vec<ModelType> {
     match profile {
-        BenchProfile::Smoke => vec![ModelType::AllMiniLML6V2Q, ModelType::BGESmallENV15Q],
+        BenchProfile::Smoke => vec![ModelType::AllMiniLML6V2Q],
         BenchProfile::Standard => vec![
             ModelType::AllMiniLML6V2Q,
-            ModelType::BGESmallENV15Q,
-            ModelType::JinaEmbeddingsV2BaseCode,
+            ModelType::MxbaiEmbedXSmallV1,
+            ModelType::JinaCodeEmbeddings15B,
         ],
         BenchProfile::Full => ModelType::all().to_vec(),
     }
@@ -660,15 +660,12 @@ mod tests {
     #[test]
     fn test_profile_model_selection() {
         let smoke = select_models(None, BenchProfile::Smoke).unwrap();
-        assert_eq!(
-            smoke,
-            vec![ModelType::AllMiniLML6V2Q, ModelType::BGESmallENV15Q]
-        );
+        assert_eq!(smoke, vec![ModelType::AllMiniLML6V2Q]);
 
         let standard = select_models(None, BenchProfile::Standard).unwrap();
         assert!(standard.contains(&ModelType::AllMiniLML6V2Q));
-        assert!(standard.contains(&ModelType::JinaEmbeddingsV2BaseCode));
-        assert!(standard.contains(&ModelType::BGESmallENV15Q));
+        assert!(standard.contains(&ModelType::MxbaiEmbedXSmallV1));
+        assert!(standard.contains(&ModelType::JinaCodeEmbeddings15B));
         assert_eq!(standard.len(), 3);
 
         let full = select_models(None, BenchProfile::Full).unwrap();
@@ -677,13 +674,11 @@ mod tests {
 
     #[test]
     fn test_models_filter_precedence() {
-        let selected = select_models(Some("minilm-l6-q,jina-code"), BenchProfile::Full).unwrap();
+        let selected =
+            select_models(Some("minilm-l6-q,jina-code-1.5b"), BenchProfile::Full).unwrap();
         assert_eq!(
             selected,
-            vec![
-                ModelType::AllMiniLML6V2Q,
-                ModelType::JinaEmbeddingsV2BaseCode
-            ]
+            vec![ModelType::AllMiniLML6V2Q, ModelType::JinaCodeEmbeddings15B]
         );
     }
 
