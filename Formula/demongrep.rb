@@ -10,6 +10,7 @@ class Demongrep < Formula
   depends_on "pkgconf" => :build
   depends_on "protobuf" => :build
   depends_on "openssl" => :build
+  depends_on "onnxruntime"
 
   def install
     system "cargo", "install", *std_cargo_args
